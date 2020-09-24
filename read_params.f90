@@ -32,40 +32,80 @@ contains
     namelist /misc/ glass_file,ispoisson,tabfile,istabulated
     
     npart=0
-
-    open(1,file=infile,status='old')
-    rewind(1)
-    read(1,nml=halo)
-    rewind(1)
-    read(1,nml=disc)
-    rewind(1)
-    read(1,nml=bulge)
-    rewind(1)
-    read(1,nml=gas_disc)
-    rewind(1)
-    read(1,nml=gas_halo)    
-    rewind(1)
-    read(1,nml=black_hole)
-    rewind(1)
-    read(1,nml=nbody)
-    rewind(1)
-    read(1,nml=output)
-    rewind(1)
-    read(1,nml=misc)        
-    close(1)
-
-    if(mode.eq.0) then        ! mode=0 is for gas disc
+    
+    if(mode.eq.0) then ! mode=0 is for gas disc
+       open(1,file=infile,status='old')
+       rewind(1)
+       read(1,nml=halo)
+       rewind(1)
+       read(1,nml=disc)
+       rewind(1)
+       read(1,nml=bulge)
+       rewind(1)
+       read(1,nml=gas_disc)
+       rewind(1)
+       read(1,nml=black_hole)
+       rewind(1)
+       read(1,nml=output)
+       rewind(1)
+       read(1,nml=misc)        
+       close(1)
        npart=ndisc
        outfile=trim(disc_file)
-    else if (mode.eq.1) then  ! mode=1 is for gas halo
+    else if (mode.eq.1) then ! mode=1 is for gas halo
+        open(1,file=infile,status='old')
+        rewind(1)
+        read(1,nml=halo)
+        rewind(1)
+        read(1,nml=disc)
+        rewind(1)
+        read(1,nml=bulge)
+        rewind(1)
+        read(1,nml=gas_halo)
+        rewind(1)
+        read(1,nml=black_hole)
+        rewind(1)
+        read(1,nml=output)
+        rewind(1)
+        read(1,nml=misc)
+        close(1)
         npart=nhalo
         outfile=trim(halo_file)
-    else if (mode.eq.2) then  ! mode=2 is for nbody components
+    else if (mode.eq.2) then ! mode=2 is for nbody components
+        open(1,file=infile,status='old')
+        rewind(1)
+        read(1,nml=halo)
+        rewind(1)
+        read(1,nml=disc)
+        rewind(1)
+        read(1,nml=bulge)
+        rewind(1)
+        read(1,nml=black_hole)
+        rewind(1)
+        read(1,nml=nbody)
+        rewind(1)
+        read(1,nml=output)
+        rewind(1)
+        read(1,nml=misc)
+        close(1)
         npart=sum(npart_comp)
         outfile=trim(nbody_file)
-    else
-        stop 'mode not supported'
-    end if
+    else 
+        stop 'mode not supported'    
+    end if 
+
+    !if(mode.eq.0) then        ! mode=0 is for gas disc
+    !   npart=ndisc
+    !   outfile=trim(disc_file)
+    !else if (mode.eq.1) then  ! mode=1 is for gas halo
+    !    npart=nhalo
+    !    outfile=trim(halo_file)
+    !else if (mode.eq.2) then  ! mode=2 is for nbody components
+    !    npart=sum(npart_comp)
+    !    outfile=trim(nbody_file)
+    !else
+    !    stop 'mode not supported'
+    !end if
 
     if(snap_format.gt.4) snap_format=1
 

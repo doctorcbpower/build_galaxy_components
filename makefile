@@ -49,5 +49,5 @@ mk_nbody_comps.exe: $(FOBJ) mk_nbody_comps.o
 	touch $*.o $*.mod
 
 clean: 
-	rm mk_gas_disc.exe mk_gas_halo.exe mk_nbody_comps.exe *.mod *.o merge_comps.exe compute_sigma.exe
+	rm mk_gas_disc.exe mk_gas_halo.exe mk_nbody_comps.exe *.mod *.o merge_comps.exe
 	touch makefile
