@@ -1,12 +1,12 @@
-OPT += -DNFW_HALO
-#OPT += -DHERNQUIST_HALO
+#OPT += -DNFW_HALO
+OPT += -DHERNQUIST_HALO
 #OPT += -DLOGARITHMIC_HALO
 #OPT += -DHERNQUIST_BULGE
-#OPT += -DSTELLAR_DISC_EXPONENTIAL
+OPT += -DSTELLAR_DISC_EXPONENTIAL
 OPT += -DEXPONENTIAL_DISC
-#OPT += -DGalIC
-OPT += -DHDF5
-OPT += -DDEBUG
+OPT += -DGalIC
+#OPT += -DHDF5
+#OPT += -DDEBUG
 
 OPTS = 
 
@@ -16,8 +16,8 @@ HDF5INCL =
 HDF5LIB  =
 else
 FC = gfortran-9 $(OPTS)
-HDF5_INCL=-I/usr/local/include 
-HDF5_LIBS=-I/usr/local/Cellar/hdf5@1.10/1.10.6/include -L/usr/local/Cellar/hdf5@1.10/1.10.6/lib /usr/local/Cellar/hdf5@1.10/1.10.6/lib/libhdf5hl_fortran.a /usr/local/Cellar/hdf5@1.10/1.10.6/lib/libhdf5_hl.a /usr/local/Cellar/hdf5@1.10/1.10.6/lib/libhdf5_fortran.a /usr/local/Cellar/hdf5@1.10/1.10.6/lib/libhdf5.a -L/usr/local/opt/szip/lib -lsz -lz -ldl -lm
+HDF5_INCL= 
+HDF5_LIBS=
 endif
 
 OPTS= $(OPT) 

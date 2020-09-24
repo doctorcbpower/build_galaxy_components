@@ -1,84 +1,148 @@
-build_gas_components: containing mk_disc, mk_halo, merge_comps
-==============================================================
+build_galaxy_components
+=======================
 
-* mk_disc.exe - code to compute the hydrostatic equilibrium gas 
-distribution in an isothermal disc embedded within a gravitational
-potential, usually a composite of a stellar bulge, stellar disc, and 
-dark matter halo. 
+This repository contains a set of four codes that have been developed by A/Prof Chris Power (ICRAR/UWA). The purpose of each is highlighted below:
 
-* mk_halo.exe - code to compute the hydrostatic equilibrium gas
-distribution in a gaseous halo, based on the formalism set out
-in Komatsu & Seljak 2001.
+* mk_gas_disc.exe - this code is used to compute the hydrostatic equilibrium gas distribution of an isothermal disc embedded within a gravitational potential, usually a composite of a stellar bulge, stellar disc, and dark matter halo. 
 
-* merge_comps.exe - code to merge gas components with N-body
-components.
+* mk_gas_halo.exe - this code is used to compute the hydrostatic equilibrium gas distribution in a gaseous halo, based on the formalism set out in Komatsu & Seljak 2001.
+
+* mk_nbody_comps.exe - this code is used to generate equilibrium n-body components of galaxies with arbitary numbers of components. (...)
+
+* merge_comps.exe - this code is used to merge gas components with N-body components.
 
 Usage
 =====
 
-% make mk_disc.exe
+Compilation
+-----------
 
-% vim parameters.txt       ! Edit the parameters for the run
+To use these codes, they first need to be compiled. Begin by modifying the makefile included in the repository. 
 
-% ./mk_disc.exe ./parameters.txt
+> vim makefile
 
-% make merge_comps.exe 
+There are a number of available options in the makefile that can be activated based on the user's requirements. The first of these catagorise the type of potential in which you would like to generate your galaxy componets:
 
-% ./merge_comps.exe -gas ./out.gdt -nbody /path/to/galic_nbody_output
+#OPT += -DNFW_HALO                  % adding the potential of an analytic NFW halo
+#OPT += -DHERNQUIST_HALO            % adding the potential of a Hernquist halo 
+#OPT += -DLOGARITHMIC_HALO          % adding the potential of a logarithmic halo 
 
-% make mk_halo.exe
+Only one of these halo options can be activiated at a time. 
 
-% vim parameters.txt       ! Edit the parameters for the run
+#OPT += -DHERNQUIST_BULGE           % adding the potential of a Hernquist bulge
+#OPT += -DSTELLAR_DISC_EXPONENTIAL    % adding the potential of an exponential stellar disk
 
-% ./mk_halo.exe ./parameters.txt
+The potentials of other components of your N-body model that can optionally be included. Neither, either or both of these options can be activated at a time.
 
-% ./merge_comps.exe -in <file1> -in <file2> ... (-in_hdf5|-out_hdf5|-out_snap1|-out_snap2) -out <file>
+#OPT += -DEXPONENTIAL_DISC            % adding the potential of an exponential gas disk
+
+The potential for the gas disc to be placed within the N-body components. This flag needs to be activated when running mk_gas_disc.exe.
+
+#OPT += -DGalIC
+
+This flag needs to be activated in order to use constants and definitions that are consistent with the GalIC N-body initial conditions generation code (Yurin & Springel, 2014). For example, in the case in which you would like to merge a GalIC N-body simulation and gas components generated with this code. 
+
+#OPT += -DHDF5
+
+This flag needs to be activated to read and generate HDF5 outputs. If turned on, it is necessary to specify the paths of the include and lib folders of your HDF5 installation within the makefile. 
+
+Once you have modified the makefile for your system, the code can be compiled and the executable generated:
+
+> make
+
+This will compile all executable programs. If you would like to modify the executable for alternative combinations of components, run 
+
+> make clean
+
+and then recompile the executables with the modified makefile. 
+
 
 Inputs
-======
+------
 
-The parameters file contains a series of namelists; the format is as follows
+> vim parameters.txt 
+
+To specify the details of the potential within which the components are built, first modify the input parameters. The parameter.txt file contains a series of namelists; the format is as follows: 
 
 &HALO
-m200=1.e0               ! Virial mass, M200, in units of 1e10 Msol
-c200=6.5                ! NFW concentration
+m200=1.e0               % Virial mass, M200, in units of 1e10 Msol
+c200=10                 % NFW concentration
 /
 
 &DISC
-mdisc=0.035             ! Disc mass fraction, with respect to M200
-fdisc=0.208             ! Disc scale length, as a fraction of the halo scale radius, R200/c200
-mstar=0.9
+mdisc=0.035             % Disc mass as a fraction of M200
+fdisc=0.2               % Disc scale length as a fraction of halo scale radius
+mstar=0.9               % The fraction of the disc mass that is contained in the stellar component
+sigma0=0.0              % ?
+fhole=0.0               % ?
+fdref=-0.0              % ?
 /
 
 &BULGE
-mbulge=0.0              ! Bulge mass fraction, with respect to M200              
-fbulge=0.0              ! Bulge scale length, as a fraction of the halo scale radius, R200/c200
+mbulge=0.0              % Bulge mass as a fraction of M200
+fbulge=0.0              % Bulge scale radius as a fraction of the halo scale radius
 /
 
 &GAS_DISC
-temp=1.d4               ! Temperature of the disc, in K
-ndisc=200000            ! Number of particles in gas disc
+temp=1.d4               % Temperature of the gas disc in K
+ndisc=200000            % Number of particles in the gas disc  
 /
 
 &GAS_HALO
-fbaryon=0.16            ! Baryon fraction, OmegaB/Omega0
-nhalo=20000             ! Number of particles in gas halo
+fbaryon=0.16            % Baryon fraction, Omega<sub>B</sub> / Omega<sub>0</sub>
+nhalo=20000             % Number of particles in the gas halo
+lambda_b=0.0            % ?
+v_radial=0.0            % ?
 /
 
 &BLACK_HOLE
-mbh=0.0                 ! Black hole mass fraction, with respect to M200
+mbh=.0e-5               % Black hole mass as a fraction of M200
+/
+
+&NBODY      
+ncomp=0                 % ?
 /
 
 &OUTPUT
-disc_file='gas_disc.gdt'       ! Output gas disc file
-halo_file='gas_halo.gdt'       ! Output gas halo file
-snap_format=1                  ! Format of output file - (1/2/3) for SnapFormat=1,2, HDF5
+disc_file='gas_disc.gdt' % Output gas disc Gadget file
+halo_file='gas_halo.gdt' % Output gas halo Gadget file
+snap_format=1            % Format of output file (1 - Gadget binary snap1, 2 - Gadget binary snap2, 3 - HDF5)
 /
 
 &MISC
-glass_file='./glass_32.gdt'    ! Input glass file
-ispoisson=.true.               ! Sample from a Poisson distribution, or deform the glass
+glass_file='./glass_32.gdt' % Input glass file
+ispoisson=.false            % Sample from a Poisson distribution?
 /
+...
+
+For the &MISC options, only one of these options should be specified. To generate yourequilibrium gas component, either:
+* Sample your particles from a Poisson distribution, using the ran3() rountine from NR in F77.
+or
+* By replicating a cube of glass and deforming it to generate the required mass distribution. A glass file is provided in this repository for this use. 
+
+Running the codes
+-----------------
+
+Each code for generating components accepts the parameters from the input file parameters.txt and can be operated in a similar manner:
+
+> ./mk_gas_disc.exe ./parameters.txt    % to build a gas disc within the potential specified 
+
+> ./mk_gas_halo.exe ./parameters.txt    % to build a gas halo within the potential specified
+
+> ./mk_nbody_comps.exe ./parameters.txt % to build an N-body model with components specified 
+
+To merge an N-body model with a gas component:
+
+> ./merge_comps.exe -in ./gas_component -in ./Nbody_components -out ./merged_output
+
+It  is necessary to list the gas component file as the first in the list. If the input/output files are HDF5 format, this needs to be specified by:
+
+> ./merge_comps.exe -in_hdf5 ./gas_component.hdf5 -in_hdf5 ./Nbody_components.hdf5 -out_hdf5 ./merged_output.hdf5
+
+These flags can be modified for Gadget inputs (-in_snap1 or -in_snap2) or Swift inputs (-in_swift). Similarly, outputs can be written in any of these formats (-out_snap1, -out_snap2 or -out_swift).
+
+Notes
+-----
 
 The mean molecular weight is assumed to 4/(1+3*0.76)~1.21 appropriate for a gas disc; 
 for the hot halo, it's assumed to be ionized.
@@ -86,18 +150,3 @@ for the hot halo, it's assumed to be ionized.
 At the moment, I assume the N-body component is set up with GalIC - so potentials and 
 parameters are calculated to be consistent with this.
 
-General Comments
-================
-
-The user has the option to either lay down gas particles sampled
-from a Poisson distribution, generated using the ran3() routine from
-NR in F77, or by replicating a cube of glass and deforming it to 
-follow the desired mass distribution.
-
-At present the options for the halo, bulge, and disc mass distributions
-are
-
-* NFW and Hernquist halos
-* Hernquist bulges
-* Exponential or Miyamoto-Nagai stelar discs
-* Exponential or Power-Law gas discs
