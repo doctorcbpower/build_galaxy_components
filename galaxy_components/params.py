@@ -21,6 +21,7 @@ The compile-time options of the Fortran code (-DNFW_HALO, -DHERNQUIST_BULGE, -DG
 are runtime options in the ``[model]`` group.  Defaults reproduce the makefile as shipped.
 """
 import tomllib
+import warnings
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
@@ -33,7 +34,6 @@ class Params:
     m200: float = 0.0
     v200: float = 0.0
     c200: float = 10.0
-    sigma200: float = 0.0
     qflat: float = 1.0
     rcore: float = 0.0
     # [disc]
@@ -52,7 +52,6 @@ class Params:
     # [gas_halo]
     fbaryon: float = 0.16
     nhalo: int = 0
-    lambda_b: float = 0.0
     v_radial: float = 0.0
     rtrunc: float = 1.0
     form: str = "nfw"
@@ -68,21 +67,14 @@ class Params:
     rtrunc_comp: list = field(default_factory=lambda: [0.0] * NCOMP_MAX)
     form_comp: list = field(default_factory=lambda: [""] * NCOMP_MAX)
     istaper: bool = False
-    fdecay: float = 3000.0
     # [output]
     disc_file: str = "gas_disc"
     halo_file: str = "gas_halo"
     nbody_file: str = "nbody"
     snap_format: int = 3
-    # [misc]
-    glass_file: str = ""
-    ispoisson: bool = True
-    tabfile: str = ""
-    istabulated: bool = False
     # [model]  (Python only; replaces the Fortran -D flags)
     halo_type: str = "hernquist"  # 'hernquist' | 'nfw' | 'logarithmic'
     galic: bool = True  # GalIC conventions (total halo mass == mhalo)
-    exponential_disc: bool = True
     halo_zero_edge: bool = False  # hydrostatic gas out to rtrunc*r200 with P=0 there (Donnert 2013)
     halo_core: float = 0.0  # gas entropy floor, in units of the K&S entropy at r200 (0 = pure K&S)
     # gas-disc mesh (hardcoded in mk_gas_disc.f90)
@@ -95,18 +87,29 @@ class Params:
 
 # Which group each field lives in (the namelist groups of the Fortran code, plus ``model``).
 GROUP_FIELDS = {
-    "halo": ("m200", "v200", "c200", "sigma200", "qflat", "rcore"),
+    "halo": ("m200", "v200", "c200", "qflat", "rcore"),
     "disc": ("mdisc", "sigma0", "fdisc", "mstar", "fhole", "fdref"),
     "bulge": ("mbulge", "fbulge"),
     "gas_disc": ("temp", "ndisc"),
-    "gas_halo": ("fbaryon", "nhalo", "lambda_b", "v_radial", "rtrunc", "form"),
+    "gas_halo": ("fbaryon", "nhalo", "v_radial", "rtrunc", "form"),
     "black_hole": ("mbh",),
     "nbody": ("ncomp", "npart_comp", "fmass_comp", "rscale_comp", "raniso_comp", "beta_comp",
-              "rtrunc_comp", "form_comp", "istaper", "fdecay"),
+              "rtrunc_comp", "form_comp", "istaper"),
     "output": ("disc_file", "halo_file", "nbody_file", "snap_format"),
-    "misc": ("glass_file", "ispoisson", "tabfile", "istabulated"),
-    "model": ("halo_type", "galic", "exponential_disc", "halo_zero_edge", "halo_core",
+    "model": ("halo_type", "galic", "halo_zero_edge", "halo_core",
               "nrbin", "nzbin", "log_zmin", "log_zmax", "snap_z"),
+}
+# Fields of the Fortran namelists that this code never used or does not implement.  They are not
+# silently ignored: TOML raises, a legacy namelist warns (and the value is dropped).
+REMOVED = {
+    "sigma200": ("never used by the Fortran or this code", 0.0),
+    "lambda_b": ("gas-halo spin was commented out in the Fortran and is not implemented", 0.0),
+    "fdecay": ("never used; the exponential taper length is fixed by the slope at rtrunc_comp", 3000.0),
+    "glass_file": ("glass sampling is not implemented; the gas is Poisson-sampled", ""),
+    "ispoisson": ("only Poisson sampling is implemented", True),
+    "tabfile": ("tabulated gas haloes are not implemented", ""),
+    "istabulated": ("tabulated gas haloes are not implemented", False),
+    "exponential_disc": ("only the exponential disc potential is implemented", True),
 }
 _LIST_FIELDS = ("npart_comp", "fmass_comp", "rscale_comp", "raniso_comp", "beta_comp", "rtrunc_comp",
                 "form_comp")
@@ -167,6 +170,9 @@ def _read_toml(path: Path) -> Params:
             raise ValueError(f"{path}: invalid TOML: {e}") from None
     p = Params()
     for group, table in data.items():
+        for key in (table if isinstance(table, dict) else ()):
+            if key in REMOVED:
+                raise ValueError(f"{path}: '{key}' in [{group}] is no longer supported: {REMOVED[key][0]}")
         if group not in GROUP_FIELDS:
             raise ValueError(f"{path}: unknown table [{group}]; valid tables: {', '.join(GROUP_FIELDS)}")
         if not isinstance(table, dict):
@@ -191,11 +197,13 @@ def _read_namelist(path: Path) -> Params:
                           "galaxy-components convert FILE -o FILE.toml") from None
     nml = f90nml.read(str(path))
     p = Params()
-    for group in GROUP_FIELDS:
-        if group not in nml:
-            continue
+    for group in nml:
         for key, val in nml[group].items():
             key = key.lower()
+            if key in REMOVED:
+                if val != REMOVED[key][1] and not (isinstance(val, str) and val.strip() == REMOVED[key][1]):
+                    warnings.warn(f"{path}: '{key}' = {val!r} is ignored: {REMOVED[key][0]}", stacklevel=3)
+                continue
             if not hasattr(p, key):
                 continue
             if key in _LIST_FIELDS:

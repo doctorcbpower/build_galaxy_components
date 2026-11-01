@@ -238,9 +238,6 @@ def sample_particles(p: Params, disc: GasDisc, ndisc, rng):
     mpart = (mkeep - m0) / ndisc
     print(f"Disc mass to R={rcut:.3f} kpc: {mkeep:.6g}; particle mass {mpart:.4e}")
 
-    if not p.ispoisson:
-        raise NotImplementedError("glass-file sampling (ispoisson=.false.) is not ported yet")
-
     # radii by inversion of M(<R), rejecting anything inside the hole
     r = np.empty(0)
     row = np.empty(0, dtype=int)

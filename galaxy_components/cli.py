@@ -72,11 +72,11 @@ def _core(p, args):
 
 def run_halo(args):
     p = read_params(args.params)
-    halo = gas_halo.build_gas_halo(p, consistent=not args.legacy)
-    halo = gas_halo.add_entropy_core(p, halo, _core(p, args),
-                                     zero_edge=args.zero_edge or p.halo_zero_edge)
+    from .system import build_halo
+    halo, pg = build_halo(p, legacy_halo=args.legacy, halo_core=_core(p, args),
+                          zero_edge=args.zero_edge or p.halo_zero_edge)
     rng = np.random.default_rng(args.seed)
-    pos, vel, ug, mpart = gas_halo.sample_gas_halo(p, halo, rng, velocity_noise=not args.cold)
+    pos, vel, ug, mpart = gas_halo.sample_gas_halo(pg, halo, rng, velocity_noise=not args.cold)
     out = Path(args.outdir)
     out.mkdir(parents=True, exist_ok=True)
     species = {0: dict(pos=pos, vel=vel, ug=ug, mass=mpart)}

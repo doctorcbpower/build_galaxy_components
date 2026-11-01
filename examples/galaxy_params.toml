@@ -23,7 +23,7 @@ ndisc = 20000             # gas particles in the disc (0 = no gas disc)
 [gas_halo]
 fbaryon = 0.16            # baryon fraction inside r200
 nhalo = 20000             # gas particles inside r200 (0 = no gas halo)
-rtrunc = 1.5              # sampling edge, in units of r200
+# rtrunc                 # gas edge: with istaper it is set by rtrunc_comp (below), so leave unset
 form = "hernquist"        # dark halo the gas sits in: "nfw" or "hernquist"
 
 [black_hole]
@@ -35,7 +35,7 @@ npart_comp = [20000]
 fmass_comp = [1.0]        # mass in units of M200
 form_comp = ["nfw"]       # "nfw", "hernquist" or "burkert"
 rscale_comp = [1.0]       # scale radius in units of r200/c200
-rtrunc_comp = [2.0]       # truncation radius in units of r200
+rtrunc_comp = [1.5]       # truncation radius in units of r200 (the gas halo ends here too, with P = 0)
 # Velocity anisotropy (default isotropic); at most one of these per component:
 # raniso_comp = [2.0]     # Osipkov-Merritt radius in units of r200/c200 (radially biased outskirts)
 # beta_comp = [-0.3]      # constant beta in (-0.5, 0.5); negative = tangential

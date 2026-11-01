@@ -30,7 +30,7 @@ Python ≥ 3.11. From a clone of this repository:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[test]"        # numpy>=2, scipy>=1.12, h5py (+ pytest, f90nml); editable, so edits take effect
-pytest -q                       # 97 tests, ~50 s
+pytest -q                       # 111 tests, ~1 min
 galaxy-components --help        # console script (also: python -m galaxy_components ...)
 ```
 The only required dependencies are `numpy`, `scipy` and `h5py`; `f90nml` is optional and only needed to read legacy Fortran
@@ -80,16 +80,19 @@ The legacy Fortran programs in [`legacy/`](legacy/) still need the namelist form
 
 | table | fields | meaning |
 |---|---|---|
-| `[halo]` | `m200`, `v200`, `c200`, `sigma200`, `qflat`, `rcore` | virial mass [10¹⁰ M☉] (or `v200`), concentration; log-halo flattening/core |
+| `[halo]` | `m200`, `v200`, `c200`, `qflat`, `rcore` | virial mass [10¹⁰ M☉] (or `v200`), concentration; log-halo flattening/core |
 | `[disc]` | `mdisc`, `mstar`, `fdisc`, `fhole`, `fdref`, `sigma0` | disc mass (>0: fraction of M200; ≤0: absolute), stellar fraction, scale length as a fraction of the halo scale, inner hole, … |
 | `[bulge]` | `mbulge`, `fbulge` | Hernquist bulge mass and scale |
 | `[gas_disc]` | `temp`, `ndisc` | gas-disc temperature [K], particle count (0 = no gas disc) |
-| `[gas_halo]` | `fbaryon`, `nhalo`, `rtrunc`, `form`, `lambda_b`, `v_radial` | baryon fraction, particles inside r200 (0 = no gas halo), sampling edge / r200, `"nfw"` or `"hernquist"` |
+| `[gas_halo]` | `fbaryon`, `nhalo`, `rtrunc`, `form`, `v_radial` | baryon fraction, particles inside r200 (0 = no gas halo), sampling edge / r200 (set by `rtrunc_comp` when `istaper`), `"nfw"` or `"hernquist"` |
 | `[black_hole]` | `mbh` | central black-hole mass |
-| `[nbody]` | `ncomp`, `npart_comp`, `fmass_comp`, `form_comp`, `rscale_comp`, `rtrunc_comp`, `raniso_comp`, `beta_comp`, `istaper`, `fdecay` | N-body components (`"nfw"`, `"hernquist"`, `"burkert"`); lists are per component, at most 5; `raniso_comp`/`beta_comp` set the velocity anisotropy ([below](#what-each-component-models)) |
+| `[nbody]` | `ncomp`, `npart_comp`, `fmass_comp`, `form_comp`, `rscale_comp`, `rtrunc_comp`, `raniso_comp`, `beta_comp`, `istaper` | N-body components (`"nfw"`, `"hernquist"`, `"burkert"`); lists are per component, at most 5; `raniso_comp`/`beta_comp` set the velocity anisotropy ([below](#what-each-component-models)) |
 | `[output]` | `disc_file`, `halo_file`, `nbody_file`, `snap_format` | output names; **only HDF5 (`snap_format = 3`) is written** |
-| `[misc]` | `glass_file`, `ispoisson`, `tabfile`, `istabulated` | `ispoisson` must be `true` (glass-file sampling is not ported) |
-| `[model]` | `halo_type`, `galic`, `exponential_disc`, `halo_core`, `halo_zero_edge`, `nrbin`, `nzbin`, `log_zmin`, `log_zmax`, `snap_z` | options that replaced the Fortran `-D` compile flags, plus the newer ones |
+| `[model]` | `halo_type`, `galic`, `halo_core`, `halo_zero_edge`, `nrbin`, `nzbin`, `log_zmin`, `log_zmax`, `snap_z` | options that replaced the Fortran `-D` compile flags, plus the newer ones |
+
+Parameters that the Fortran namelist carried but that nothing used or implemented (`sigma200`, `lambda_b`, `fdecay`, `glass_file`,
+`ispoisson`, `tabfile`, `istabulated`, `exponential_disc`) are not silently accepted: a TOML file that sets one is an error that says
+why, and a legacy namelist gives a warning and drops the value (only if it differs from the old default).
 
 `[model]`: `halo_type = "hernquist" | "nfw" | "logarithmic"` (default `"hernquist"`), `galic = true` (GalIC
 conventions: the Hernquist halo has total mass `mhalo` and scale `a = r200/c200 · √(2 f(c))`), `halo_core` (entropy
@@ -147,6 +150,13 @@ the disc:
 * `--zero-edge` (after Donnert 2013) makes the gas hydrostatic only out to R_max = `rtrunc`·r200 with **P(R_max) = 0**, so the
   density and temperature fall smoothly to zero rather than ending in a pressure cliff. The mass inside r200 is matched by an
   overall entropy scale; the sampled halo then holds ≈ 1.01–1.03 × f_b M200 instead of up to 1.7×.
+* **Truncated N-body halo (`istaper = true`).** The N-body halo is tapered beyond `rtrunc_comp`·r200 (the largest over the
+  components), and the gas halo ends at the same radius with P = 0, whatever `halo_zero_edge` says. The K&S temperature profile is
+  the equilibrium of the *untruncated* halo; cut at the taper radius it leaves a pressure cliff and the outskirts expand into the
+  tapered potential. So the gas is re-solved in the actual enclosed mass of the N-body model (K&S entropy shape plus `halo_core`,
+  mass f_b M200 inside r200): for the default NFW halo tapered at 1.5 r200 it is 1.3× colder at 0.5 r200, 2.4× at r200 and 5.7×
+  at 1.3 r200, and falls to zero at the edge. `rtrunc` is then set by `rtrunc_comp`; giving a different value is an error, and
+  so is a taper radius inside r200. `--legacy` skips this, as the Fortran did.
 
 | halo (default disc) | disc mass kept | disc outer radius |
 |---|---|---|
@@ -156,7 +166,7 @@ the disc:
 | core 0.1, zero edge | 46 % | 4.5 kpc |
 
 The Fortran also gives each halo particle a Gaussian velocity with σ = √(2u) per component (about the sound speed, ~250 km/s);
-this is kept by default, `--cold` removes it. The spin parameter `lambda_b` is not applied by the Fortran and is ignored here.
+this is kept by default, `--cold` removes it.
 
 **Compounding the disc and the halo.** Built independently, the two gas components overlap and the cold disc ignores the pressure of the
 hot halo. `galaxy`/`system` therefore apply a pressure-balance rule: the disc exists where its pressure ρ_d c_s² is at least the
@@ -263,7 +273,7 @@ merge.write_merged("merger.hdf5", species, box)
 ## Tests
 
 ```bash
-pytest -q              # everything, ~50 s
+pytest -q              # everything, ~1 min
 pytest -q -m smoke     # end-to-end runs of every command and example, ~25 s
 ```
 The physics tests check against analytic results: the exponential-disc potential against the Freeman closed form, the vertical solver
@@ -300,7 +310,7 @@ out-of-bounds read in `fintrp` (`legacy/mk_gas_disc.f90`, `xp(0)`).
   measures β ≈ −0.14 in the innermost ~0.05 r_s (about 0.1 % of the particles; probably its radius-redraw rule, not investigated); the anisotropic samplers recover
   their target there to ≈ 0.05.
 * Systems are superposed, not re-equilibrated, apart from the gas pressure-balance rules.
-* Glass-file sampling (`ispoisson=.false.`) and Gadget binary output are not ported; `form_comp='general'` is not supported.
+* Glass-file sampling and Gadget binary output are not ported; `form_comp='general'` is not supported.
 * `read_tabulated` for a tabulated halo profile is a verbatim port that could not be tested (no data file).
 * The AREPO output has not been run in AREPO.
 * A 10⁴ K exponential disc inside a hot halo is always pressure-confined at a few scale lengths; see the table above.

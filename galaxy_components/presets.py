@@ -17,7 +17,7 @@ def example_params(**overrides) -> Params:
         form="hernquist",
         ncomp=1, npart_comp=[20000, 0, 0, 0, 0], fmass_comp=[1.0, 0, 0, 0, 0],
         form_comp=["nfw", "", "", "", ""], rscale_comp=[1.0, 0, 0, 0, 0],
-        rtrunc_comp=[2.0, 0, 0, 0, 0], istaper=True,
+        rtrunc_comp=[1.5, 0, 0, 0, 0], istaper=True,
         nrbin=60, nzbin=250,
     )
     for k, v in overrides.items():

@@ -25,9 +25,8 @@ ndisc=20000
 &GAS_HALO
 fbaryon=0.16
 nhalo=20000
-lambda_b=0.0
 v_radial=0.0
-rtrunc=1.5
+rtrunc=1.0
 form='hernquist'
 /
 
@@ -50,7 +49,7 @@ rscale_comp(1)=1.0
 rscale_comp(2)=0.01
 rscale_comp(3)=0.0005
 raniso_comp(1)=0.0
-rtrunc_comp(1)=2.
+rtrunc_comp(1)=1.5
 rtrunc_comp(2)=0.5
 rtrunc_comp(3)=0.5
 istaper=.true.
@@ -64,8 +63,4 @@ snap_format=3
 /
 
 &MISC
-glass_file='/Users/cpower/MyCodes/SPH_ICs/glass_32.gdt'
-ispoisson=.true.
-tabfile='/Users/cpower/CurrentWork/Pluto/CoolingHalo/data_best_fGas=0.010_Mh=4.00E+13_500m_ccc+gal_Mgal=1.00E+12galPot=true_pR=1.45E-17.csv'
-istabulated=.false.
 /

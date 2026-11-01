@@ -243,9 +243,10 @@ class NBodyModel:
 
 def build_nbody(p: Params, verbose=True, legacy=True) -> NBodyModel:
     log = print if verbose else (lambda *a, **k: None)
-    if p.fdecay <= 0:
-        raise NotImplementedError("fdecay=0 (log-derivative branch) is dead code with Fortran defaults")
     ncomp = p.ncomp
+    if p.istaper and any(p.rtrunc_comp[i] <= 0 for i in range(ncomp)):
+        raise ValueError("istaper needs rtrunc_comp > 0 for every component "
+                         f"(got {list(p.rtrunc_comp[:ncomp])})")
     if p.mdisc != 0 or p.mstar != 0:
         log("Note: disc mass in &DISC is not included in the spherical N-body potential; "
             "the disc is gas-only and acts only as a perturbation on these components.")

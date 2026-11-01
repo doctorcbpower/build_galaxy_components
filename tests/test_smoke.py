@@ -304,9 +304,9 @@ def test_example_toml_runs_a_system(tmp_path):
 # ------------------------------------------------------------------ anisotropy from parameter files
 @pytest.mark.parametrize("fmt,text", [
     ("toml", '[halo]\nm200 = 100.0\n[nbody]\nncomp = 1\nnpart_comp = [4000]\nfmass_comp = [1.0]\n'
-             'form_comp = ["nfw"]\nrscale_comp = [1.0]\nrtrunc_comp = [2.0]\nistaper = true\nbeta_comp = [-0.25]\n'),
+             'form_comp = ["nfw"]\nrscale_comp = [1.0]\nrtrunc_comp = [1.5]\nistaper = true\nbeta_comp = [-0.25]\n'),
     ("nml", "&HALO\nm200=100.\nc200=10.\n/\n&NBODY\nncomp=1\nnpart_comp(1)=4000\nfmass_comp(1)=1.\n"
-            "form_comp(1)='nfw'\nrscale_comp(1)=1.\nrtrunc_comp(1)=2.\nraniso_comp(1)=2.0\nistaper=.true.\n/\n"),
+            "form_comp(1)='nfw'\nrscale_comp(1)=1.\nrtrunc_comp(1)=1.5\nraniso_comp(1)=2.0\nistaper=.true.\n/\n"),
 ])
 def test_anisotropy_through_the_cli(tmp_path, fmt, text):
     path = tmp_path / ("p.toml" if fmt == "toml" else "p.txt")

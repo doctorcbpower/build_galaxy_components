@@ -10,7 +10,7 @@ gas disc, gas halo (compounded by pressure balance, see ``compound``) and the
 spherical N-body components -- and ``read_system`` loads a system someone else
 made (including files from the Fortran codes) so it can be stitched too.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import h5py
@@ -46,6 +46,40 @@ class System:
         return (m[:, None] * x).sum(0) / m.sum()
 
 
+def build_halo(p, nb=None, legacy_halo=False, halo_core=None, zero_edge=None):
+    """The gas halo for ``p`` and the Params it was built with.
+
+    With ``istaper`` the N-body halo is truncated at ``rtrunc_comp * r200`` (the largest over the
+    components), and the gas is truncated at the same radius.  The K&S temperature profile is the
+    equilibrium of the *untruncated* potential; in the shallower tapered potential it would be too
+    hot and the outskirts would expand.  So the gas is re-solved in the actual enclosed mass of the
+    N-body model: K&S entropy shape (plus ``halo_core``), mass fbaryon*M200 inside r200, and P = 0
+    at the truncation radius.  The pressure and temperature therefore fall to zero at the edge and
+    the gas is in hydrostatic equilibrium in the tapered halo.  ``legacy_halo`` skips this, as the
+    Fortran did.
+    """
+    core = p.halo_core if halo_core is None else halo_core
+    edge0 = p.halo_zero_edge if zero_edge is None else zero_edge
+    if not (p.istaper and p.ncomp > 0) or legacy_halo:
+        ks = gas_halo.build_gas_halo(p, consistent=not legacy_halo, verbose=False)
+        return gas_halo.add_entropy_core(p, ks, core, verbose=False, zero_edge=edge0), p
+    redge = max(p.rtrunc_comp[:p.ncomp])
+    if redge <= 1.0:
+        raise ValueError(f"the gas halo is truncated at the N-body taper radius, which must lie beyond "
+                         f"r200 (max rtrunc_comp = {redge:g}); raise rtrunc_comp or set istaper = false")
+    if p.rtrunc != Params().rtrunc and abs(p.rtrunc - redge) > 1e-9:
+        raise ValueError(f"rtrunc = {p.rtrunc:g} conflicts with the N-body taper radius {redge:g} r200: "
+                         "with istaper the gas halo ends where the N-body halo is truncated, so leave "
+                         "rtrunc unset")
+    pg = replace(p, rtrunc=redge)
+    nb = nbody.build_nbody(p, verbose=False) if nb is None else nb
+    lr, lm = np.log(nb.rtab), np.log(nb.mtab)
+    ks = gas_halo.build_gas_halo(pg, consistent=True, verbose=False)
+    halo = gas_halo.add_entropy_core(pg, ks, core, verbose=False, zero_edge=True,
+                                     mdm=lambda r: np.exp(np.interp(np.log(r), lr, lm)))
+    return halo, pg
+
+
 def build_system(params, name="system", seed=1, overrides=None, naive_merge=False,
                  halo_core=None, zero_edge=None, legacy_halo=False, cold_halo=False, nbody_components=True,
                  verbose=False) -> System:
@@ -68,11 +102,8 @@ def build_system(params, name="system", seed=1, overrides=None, naive_merge=Fals
     gas_parts = []
     halo = disc = None
     if have_halo:
-        halo = gas_halo.build_gas_halo(p, consistent=not legacy_halo, verbose=False)
-        core = p.halo_core if halo_core is None else halo_core
-        halo = gas_halo.add_entropy_core(p, halo, core, verbose=False,
-                                         zero_edge=p.halo_zero_edge if zero_edge is None else zero_edge)
-        hpos, hvel, hug, hmp = gas_halo.sample_gas_halo(p, halo, rng, velocity_noise=not cold_halo,
+        halo, pg = build_halo(p, legacy_halo=legacy_halo, halo_core=halo_core, zero_edge=zero_edge)
+        hpos, hvel, hug, hmp = gas_halo.sample_gas_halo(pg, halo, rng, velocity_noise=not cold_halo,
                                                         verbose=False)
     if have_disc:
         disc = gas_disc.build_gas_disc(p, model, verbose=False)

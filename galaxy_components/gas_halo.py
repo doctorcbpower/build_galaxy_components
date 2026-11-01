@@ -23,8 +23,7 @@ from typing import Callable
 import numpy as np
 from scipy import integrate
 
-from .constants import (GGDT, KB, KMS_IN_MS, MP, PI, GAMMA, MPC_IN_M, MSOL_IN_KG,
-                        LUNIT, MUNIT, virial_mass, virial_radius)
+from .constants import GGDT, KB, KMS_IN_MS, MP, PI, GAMMA, virial_mass, virial_radius
 from .params import Params
 
 MU_HALO = 0.61  # mean molecular weight of the ionised halo gas
@@ -77,7 +76,7 @@ class HaloGas:
 
 def build_gas_halo(p: Params, ntab=1000, consistent=True, verbose=True) -> HaloGas:
     log = print if verbose else (lambda *a, **k: None)
-    kind = "hernquist" if p_form(p) == "hernquist" else "nfw"
+    kind = "hernquist" if (p.form or "nfw").lower() == "hernquist" else "nfw"
     m200 = virial_mass(p.v200) if p.v200 > 0 else p.m200
     r200 = virial_radius(m200)
     rs = r200 / p.c200
@@ -145,7 +144,8 @@ def _loglin_interp(rr, r, y, floor=1e-300):
     return np.where(rr >= r[-1], np.maximum(y[-1], 0.0), np.maximum(out, 0.0))
 
 
-def add_entropy_core(p: Params, ks: HaloGas, f_core: float, verbose=True, zero_edge=False) -> HaloGas:
+def add_entropy_core(p: Params, ks: HaloGas, f_core: float, verbose=True, zero_edge=False,
+                     mdm=None) -> HaloGas:
     """Re-solve the halo gas for a different entropy profile or a zero-pressure outer edge.
 
     Entropy is K = P / rho^(5/3).  The K&S halo has K_ks(r) rising outward.
@@ -165,6 +165,9 @@ def add_entropy_core(p: Params, ks: HaloGas, f_core: float, verbose=True, zero_e
     cliff and the temperature falls to zero at the edge.  With P_out fixed the
     mass is matched by an overall entropy scale s (K -> sK gives rho -> s^(-3/2) rho).
     Beyond R_max the density is zero.
+
+    ``mdm`` (callable r -> enclosed dark mass [1e10 Msol]) replaces the analytic K&S halo in the
+    hydrostatic integral; ``truncated_gas_halo`` uses it with the tapered N-body mass profile.
     """
     if f_core < 0:
         raise ValueError("f_core must be >= 0")
@@ -174,7 +177,7 @@ def add_entropy_core(p: Params, ks: HaloGas, f_core: float, verbose=True, zero_e
     r = ks.rtab
     x = r / ks.a
     fc = float(_fnorm(ks.kind, ks.conc))
-    g = GGDT * ks.m_ref * _fnorm(ks.kind, x) / fc / r ** 2
+    g = (GGDT * ks.m_ref * _fnorm(ks.kind, x) / fc if mdm is None else GGDT * mdm(r)) / r ** 2
     rho_ks = ks.rho(r)
     p_ks = (GAMMA - 1) * rho_ks * ks.u(r)
     k_ks = p_ks / rho_ks ** (5.0 / 3.0)
@@ -234,32 +237,6 @@ def add_entropy_core(p: Params, ks: HaloGas, f_core: float, verbose=True, zero_e
                    float(rho[0]), ks.mgas, r, cum / target, u, rho_fn, u_fn, ks.m_ref)
 
 
-def p_form(p: Params):
-    return (p.form or "nfw").lower() if hasattr(p, "form") else "nfw"
-
-
-def read_tabulated(path, ntab=1000):
-    """Port of read_tabulated_data: columns r, density, pressure, temperature.
-
-    Unit conversions are copied verbatim from the Fortran (r is divided by
-    100 kpc in metres, density by (1e10 Msol)/(100 kpc)^3 in SI) and have not
-    been exercised: no tabulated file was available to test against.
-    """
-    data = np.loadtxt(path)
-    n = len(data)
-    if n > ntab:
-        raise ValueError("need to increase ntab")
-    length = LUNIT * 100.0 * MPC_IN_M
-    r = data[:, 0] / length
-    rho = data[:, 1] * length ** 3 / (MUNIT * 1000.0 * MSOL_IN_KG)
-    temp = data[:, 3]
-    dlogr = np.log(data[-1, 0] / data[0, 0]) / n
-    m = 4 * PI * np.cumsum(r ** 3 * rho * dlogr)
-    u = (1.0 / U_TO_TEMP) * temp / 0.61
-    mgas = m[-1]
-    return r, m / mgas, u, mgas
-
-
 def sample_gas_halo(p: Params, halo: HaloGas, rng, nhalo=None, recentre=False,
                     velocity_noise=True, verbose=True):
     """Poisson-sample the halo.  Returns pos, vel, ug (float32), mpart.
@@ -268,8 +245,7 @@ def sample_gas_halo(p: Params, halo: HaloGas, rng, nhalo=None, recentre=False,
     (as the Fortran).  ``velocity_noise`` reproduces the Fortran habit of
     giving each particle a Gaussian velocity with sigma = sqrt(2 u) per
     component (about the sound speed); turn it off for a cold-velocity
-    hydrostatic start.  The spin parameter lambda_b is *not* applied in the
-    Fortran (the code is commented out) and is ignored here too.
+    hydrostatic start.
     """
     log = print if verbose else (lambda *a, **k: None)
     nhalo = p.nhalo if nhalo is None else nhalo
@@ -290,8 +266,6 @@ def sample_gas_halo(p: Params, halo: HaloGas, rng, nhalo=None, recentre=False,
     vel += p.v_radial * pos / r[:, None]
     if velocity_noise:
         vel += rng.standard_normal(pos.shape) * np.sqrt(2.0 * ug)[:, None]
-    if p.lambda_b > 0:
-        log("Warning: lambda_b > 0 is ignored (the Fortran angular-velocity code is commented out)")
     if recentre:  # Fortran recentres on the inner half by mass
         order = np.argsort(r)
         pos = pos - 2 * pos[order[: nsample // 2]].sum(0) / nsample
