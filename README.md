@@ -7,6 +7,14 @@ Equilibrium initial conditions for galaxy simulations: a **gas disc**, a hot **g
 into one or more **systems** (e.g. for a merger), and optionally converted to an **AREPO** initial condition with a
 background grid. 
 
+**Scope.** The value of this package is in building **satellite galaxies** and other gas-rich systems: a small galaxy with its own
+gas disc, hot halo and N-body halo, compounded by pressure balance, placed on an orbit around a host, resolved where gas
+overlaps, and written with an AREPO background grid. The N-body halo/bulge sampler is a spherical, Eddington-inversion
+reference (isotropic, Osipkov–Merritt or constant β); it is there to be understood and to give a working default, not to compete
+with dedicated codes. For a host that needs a live halo responding properly to a disc (flattened, self-consistent, action-based or
+made-to-measure), build it with GalIC, AGAMA or similar and load that file as a `[[system]]` with `file = "..."` in a merge TOML
+(see [Merging systems](#merging-systems)); the satellites and the gas come from here.
+
 The maintained implementation is the Python package [`galaxy_components/`](galaxy_components/). The original
 Fortran codes it grew out of are kept in [`legacy/`](legacy/) (with their own README).
 
@@ -327,12 +335,14 @@ out-of-bounds read in `fintrp` (`legacy/mk_gas_disc.f90`, `xp(0)`).
 
 ## Limitations
 
-* N-body halos are spherical (no disc in the potential, no rotation) and the anisotropy is Osipkov–Merritt or constant β in (−½, ½) only. The isotropic sampler
+* N-body halos are spherical with no rotation. By default the disc is not in their potential; `halo_feels_disc` adds only its
+  monopole (enclosed mass), which under-represents its in-plane pull and does not flatten the halo, so it is a first approximation
+  for light discs. A proper disc response is deliberately left to dedicated codes (see Scope). The anisotropy is Osipkov–Merritt or constant β in (−½, ½) only. The isotropic sampler
   measures β ≈ −0.14 in the innermost ~0.05 r_s (about 0.1 % of the particles; probably its radius-redraw rule, not investigated); the anisotropic samplers recover
   their target there to ≈ 0.05.
 * Systems are superposed, not re-equilibrated, apart from the gas pressure-balance rules.
 * Glass-file sampling and Gadget binary output are not ported; `form_comp='general'` is not supported.
-* `read_tabulated` for a tabulated halo profile is a verbatim port that could not be tested (no data file).
+* Tabulated gas-halo profiles and the unused Fortran namelist fields are not supported (see [Parameter file](#parameter-file)).
 * The AREPO output has not been run in AREPO.
 * A 10⁴ K exponential disc inside a hot halo is always pressure-confined at a few scale lengths; see the table above.
 
