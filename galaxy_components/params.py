@@ -43,6 +43,7 @@ class Params:
     mstar: float = 0.0
     fhole: float = 0.0
     fdref: float = 0.0
+    zdisc: float = 0.0   # stellar-disc thickness z0 / Rd (sech^2); 0 = razor-thin. GalIC: DiskHeight
     # [bulge]
     mbulge: float = 0.0
     fbulge: float = 0.0
@@ -89,7 +90,7 @@ class Params:
 # Which group each field lives in (the namelist groups of the Fortran code, plus ``model``).
 GROUP_FIELDS = {
     "halo": ("m200", "v200", "c200", "qflat", "rcore"),
-    "disc": ("mdisc", "sigma0", "fdisc", "mstar", "fhole", "fdref"),
+    "disc": ("mdisc", "sigma0", "fdisc", "mstar", "fhole", "fdref", "zdisc"),
     "bulge": ("mbulge", "fbulge"),
     "gas_disc": ("temp", "ndisc"),
     "gas_halo": ("fbaryon", "nhalo", "v_radial", "rtrunc", "form"),

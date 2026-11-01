@@ -11,6 +11,7 @@ c200 = 10.0               # NFW concentration
 mdisc = 0.04              # disc mass: > 0 is a fraction of M200, <= 0 is an absolute mass
 fdisc = 0.076245          # scale length as a fraction of the halo scale length
 mstar = 0.9               # fraction of the disc that is stars (the rest is gas)
+# zdisc = 0.2             # stellar-disc thickness z0 / Rd (sech^2; GalIC DiskHeight); 0 = razor-thin
 
 [bulge]
 mbulge = 0.0              # Hernquist bulge mass (fraction of M200); 0 = none

@@ -38,7 +38,7 @@ Python ≥ 3.11. From a clone of this repository:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[test]"        # numpy>=2, scipy>=1.12, h5py (+ pytest, f90nml); editable, so edits take effect
-pytest -q                       # 118 tests, ~1-2 min
+pytest -q                       # 131 tests, ~1 min
 galaxy-components --help        # console script (also: python -m galaxy_components ...)
 ```
 The only required dependencies are `numpy`, `scipy` and `h5py`; `f90nml` is optional and only needed to read legacy Fortran
@@ -89,7 +89,7 @@ The legacy Fortran programs in [`legacy/`](legacy/) still need the namelist form
 | table | fields | meaning |
 |---|---|---|
 | `[halo]` | `m200`, `v200`, `c200`, `qflat`, `rcore` | virial mass [10¹⁰ M☉] (or `v200`), concentration; log-halo flattening/core |
-| `[disc]` | `mdisc`, `mstar`, `fdisc`, `fhole`, `fdref`, `sigma0` | disc mass (>0: fraction of M200; ≤0: absolute), stellar fraction, scale length as a fraction of the halo scale, inner hole, … |
+| `[disc]` | `mdisc`, `mstar`, `fdisc`, `fhole`, `fdref`, `sigma0`, `zdisc` | disc mass (>0: fraction of M200; ≤0: absolute), stellar fraction, scale length as a fraction of the halo scale, inner hole, stellar-disc thickness z₀/R_d (GalIC `DiskHeight`; 0 = razor-thin), … |
 | `[bulge]` | `mbulge`, `fbulge` | Hernquist bulge mass and scale |
 | `[gas_disc]` | `temp`, `ndisc` | gas-disc temperature [K], particle count (0 = no gas disc) |
 | `[gas_halo]` | `fbaryon`, `nhalo`, `rtrunc`, `form`, `v_radial` | baryon fraction, particles inside r200 (0 = no gas halo), sampling edge / r200 (set by `rtrunc_comp` when `istaper`), `"nfw"` or `"hernquist"` |
@@ -126,6 +126,15 @@ and stellar exponential disc. At each radius the vertical structure solves
 exponential. The gas's own gravity enters only through that local vertical term and, for the rotation curve, the Freeman
 formula; the rotation curve is v_rot² = v_c²(background) + v_c²(gas) + c_s² dlnρ_mid/dlnR. All rings are solved together
 with a vectorised RK4 (≈ 2 s for the default mesh). The stellar-disc potential is a Hankel-transform integral.
+
+**Stellar-disc thickness (`zdisc`).** The stellar disc in the background potential is exponential in R and, with `zdisc` = z₀/R_d > 0,
+sech²(z/z₀) in height, as in GalIC (`zdisc = DiskHeight`, e.g. 0.2). This matters for the gas disc: a razor-thin stellar disc pulls
+on the gas near the plane with a constant 2πGΣ, whereas a thick one gives a force that falls to zero at the plane, so a thin-disc
+model makes the gas disc far too thin. For a GalIC Model-M1 stellar disc (z₀ = 0.2 R_d) the half-mass height of the gas disc is
+6× the razor-thin value at 0.5 R_d, 5.6× at R_d, 3.9× at 2 R_d, 2.4× at 3 R_d and 1.3× at 5 R_d, and the rotation curve changes by about 2 %. The potential is
+the thin-disc Hankel integral plus the exact plane-parallel slab difference 2πGΣ[z₀ ln(2cosh(z/z₀)) − |z|] plus a smooth remainder
+tabulated by convolution (agrees with a brute-force convolution to 0.5 % in φ(z) − φ(0); v_c² equals the numerical derivative of φ to
+0.2 %). The default `zdisc = 0` is unchanged.
 
 **N-body components** (`nbody`). Spherical, multi-component Eddington-type inversion. It sees only the N-body
 components themselves: **a disc is neither sampled nor included in its potential**, so the halo is in equilibrium only in

@@ -79,7 +79,7 @@ def build_model(p: Params, verbose=True) -> GalaxyModel:
     if mbulge > 0:
         comps.append(Hernquist(mbulge, rbulge))
     if mstar > 0:
-        comps.append(ExponentialDisc(mstar, rdisc))
+        comps.append(ExponentialDisc(mstar, rdisc, z0=p.zdisc * rdisc))
 
     log(f"Halo ({p.halo_type}): M200={m200:g} R200={r200:g} rs={rs:g} a={a:g}")
     return GalaxyModel(m200, r200, rs, p.c200, mhalo, mbulge, mdisc, mstar, mbh,
