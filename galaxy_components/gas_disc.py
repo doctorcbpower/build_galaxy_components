@@ -249,35 +249,46 @@ def resolution(disc: GasDisc, mpart, nngb=NNGB, rmin=0.0, rmax=np.inf):
     return dict(R=disc.rtab[k], ratio=(h / H)[k], dm=np.gradient(disc.mrtab)[k])
 
 
-def _warn_resolution(disc, mpart, ndisc, r0, rcut):
+def disc_window(p: Params, disc: GasDisc):
+    """Radial extent that gets particles: (r_inner, r_outer, gas mass inside r_inner, inside r_outer)."""
+    rd = disc.model.rdisc
+    # outer edge of the disc is 25 scale lengths (as the Fortran code)
+    rcut = min(disc.rtab[-1], 10 ** (np.log10(rd) + 1.4))
+    r0 = p.fhole * rd
+    m0 = np.interp(r0, disc.rtab, disc.mrtab) if r0 > 0 else 0.0
+    return r0, rcut, m0, np.interp(rcut, disc.rtab, disc.mrtab)
+
+
+def resolution_summary(disc: GasDisc, mpart, ndisc, r0, rcut):
+    """Mass-weighted h/H statistics: fraction of the gas above HRES_MAX, h/H at R_d and at the
+    90th mass percentile, the radii above the threshold, and the ndisc that resolves 90% of the gas."""
     res = resolution(disc, mpart, rmin=max(r0, disc.rtab[0]), rmax=rcut)
     R, ratio, dm = res["R"], res["ratio"], res["dm"]
     bad = ratio > HRES_MAX
-    frac = dm[bad].sum() / dm.sum()
-    if frac < 0.05:
-        return
     order = np.argsort(ratio)
     q90 = ratio[order][np.searchsorted(np.cumsum(dm[order]) / dm.sum(), 0.9)]
+    return dict(frac=dm[bad].sum() / dm.sum(), ratio_rd=ratio[np.argmin(abs(R - disc.model.rdisc))], q90=q90,
+                rbad=(R[bad].min(), R[bad].max()) if bad.any() else None,
+                n90=int(ndisc * max(q90 / HRES_MAX, 1e-3) ** 3))
+
+
+def _warn_resolution(disc, mpart, ndisc, r0, rcut):
+    s = resolution_summary(disc, mpart, ndisc, r0, rcut)
+    if s["frac"] < 0.05:
+        return
     rd = disc.model.rdisc
-    ird = np.argmin(abs(R - rd))
     warnings.warn(
         f"gas disc is vertically under-resolved: kernel size / scale height h/H > {HRES_MAX:g} for "
-        f"{100 * frac:.0f}% of the gas mass (R = {R[bad].min() / rd:.2g}-{R[bad].max() / rd:.2g} R_d; "
-        f"h/H = {ratio[ird]:.1f} at R_d, {q90:.1f} at the 90th mass percentile). Expect vertical "
-        f"breathing; ndisc ~ {int(ndisc * (q90 / HRES_MAX) ** 3):,} would resolve 90% of the gas, or "
+        f"{100 * s['frac']:.0f}% of the gas mass (R = {s['rbad'][0] / rd:.2g}-{s['rbad'][1] / rd:.2g} R_d; "
+        f"h/H = {s['ratio_rd']:.1f} at R_d, {s['q90']:.1f} at the 90th mass percentile). Expect vertical "
+        f"breathing; ndisc ~ {s['n90']:,} would resolve 90% of the gas, or "
         f"raise the temperature so the disc is thicker.", stacklevel=3)
 
 
 def sample_particles(p: Params, disc: GasDisc, ndisc, rng):
     """Draw gas particles; returns pos, vel (float32, N x 3), u, mpart."""
-    model, rtab, ztab = disc.model, disc.rtab, disc.ztab
-    rd = model.rdisc
-
-    # outer edge of the disc is 25 scale lengths (as the Fortran code)
-    rcut = min(rtab[-1], 10 ** (np.log10(rd) + 1.4))
-    mkeep = np.interp(rcut, rtab, disc.mrtab)
-    r0 = p.fhole * rd
-    m0 = np.interp(r0, rtab, disc.mrtab) if r0 > 0 else 0.0
+    rtab, ztab = disc.rtab, disc.ztab
+    r0, rcut, m0, mkeep = disc_window(p, disc)
     mpart = (mkeep - m0) / ndisc
     print(f"Disc mass to R={rcut:.3f} kpc: {mkeep:.6g}; particle mass {mpart:.4e}")
     _warn_resolution(disc, mpart, ndisc, r0, rcut)

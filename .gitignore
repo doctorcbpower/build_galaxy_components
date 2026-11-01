@@ -11,3 +11,4 @@ dist/
 *.egg-info/
 out/
 *.hdf5
+examples/galic_gas_disc/*.hdf5

@@ -1,0 +1,33 @@
+# GalIC "Model-M1" (V200 = 200 km/s, c = 10, MD = 0.035, MB = 0.05, DiskHeight = 0.2) plus a gas disc.
+# Units: kpc, km/s, 1e10 Msol.  The collisionless halo + bulge + stellar disc come from GalIC; this file
+# describes the same analytic model so the gas disc is built in its potential.
+#
+#   galaxy-components check   examples/galic_gas_disc/galic_m1.toml
+#   galaxy-components add-gas examples/galic_gas_disc/galic_m1.toml --snapshot galic.hdf5 --out ic.hdf5
+
+[halo]
+v200 = 200.0              # GalIC V200
+c200 = 10.0               # GalIC CC
+
+[model]
+halo_type = "hernquist"   # GalIC halo: Hernquist, with M200 the Hernquist *total* mass
+galic = true
+
+[disc]
+# The disc here is stars + gas.  GalIC's stellar disc is MD = 0.035 M200; with a gas disc of 25% of
+# that, mdisc = 0.035 * 1.25 and the stellar fraction mstar = 1 / 1.25.
+mdisc = 0.04375
+mstar = 0.8
+# Scale length / Hernquist a.  R_d = 4.42 kpc is the Mo, Mao & White (1998) value for LAMBDA = 0.035:
+# replace it by the scale length GalIC reports (fdisc = R_d / 34.52 kpc).
+fdisc = 0.1281
+zdisc = 0.2               # GalIC DiskHeight: stellar-disc thickness z0 / R_d (sech^2)
+
+[bulge]
+mbulge = 0.05             # GalIC MB
+fbulge = 0.1              # GalIC BulgeSize: bulge scale length / halo scale length
+
+[gas_disc]
+temp = 1.0e4              # K
+ndisc = 200000
+sampling = "sobol"        # quasi-random placement: less density shot noise than Poisson

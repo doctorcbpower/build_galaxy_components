@@ -26,7 +26,7 @@ params.toml ──► disc     gas disc in hydrostatic equilibrium (analytic pot
 ```
 
 ## Contents
-[Install](#install) · [Quick start](#quick-start) · [Parameter file](#parameter-file) · [Commands](#commands) ·
+[Install](#install) · [Quick start](#quick-start) · [Parameter file](#parameter-file) · [Commands](#commands) · [GalIC + gas disc](#galic--gas-disc-workflow) ·
 [What each component models](#what-each-component-models) · [Merging systems](#merging-systems) ·
 [Use the modules directly](#use-the-modules-directly) · [Tests](#tests) · [Differences from the Fortran](#differences-from-the-fortran) ·
 [Limitations](#limitations) · [References](#references)
@@ -38,7 +38,7 @@ Python ≥ 3.11. From a clone of this repository:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[test]"        # numpy>=2, scipy>=1.12, h5py (+ pytest, f90nml); editable, so edits take effect
-pytest -q                       # 136 tests, ~1 min
+pytest -q                       # 146 tests (one needs jupyter), ~2 min
 galaxy-components --help        # console script (also: python -m galaxy_components ...)
 ```
 The only required dependencies are `numpy`, `scipy` and `h5py`; `f90nml` is optional and only needed to read legacy Fortran
@@ -55,6 +55,10 @@ galaxy-components galaxy examples/galaxy_params.toml --outdir out --background-g
 
 # a two-galaxy parabolic merger from a TOML description
 galaxy-components merge examples/merger.toml --outdir out
+
+# add a gas disc to a GalIC snapshot (notebook and scripts in examples/galic_gas_disc/)
+galaxy-components check   examples/galic_gas_disc/galic_m1.toml
+galaxy-components add-gas examples/galic_gas_disc/galic_m1.toml --snapshot galic.hdf5 --out ic.hdf5
 
 # or script the pieces yourself
 python examples/02_gas_halo.py
@@ -117,6 +121,32 @@ floor, below), `halo_zero_edge` (zero-pressure edge, below), `nrbin`/`nzbin` (ga
 | `halo` | gas halo | `--halo-core F`, `--zero-edge`, `--legacy`, `--cold` |
 | `galaxy` / `system` | disc + gas halo + N-body in one file | all `halo` options, plus `--naive-merge`, `--no-nbody`, `--background-grid`, `--boxsize-factor`, `--nngb`, `--name` |
 | `merge CONFIG.toml` | several systems stitched into one file | see [Merging systems](#merging-systems) |
+| `check` | nothing: rotation curve, gas scale heights, vertical resolution | `--ndisc N` |
+| `add-gas` | an existing snapshot plus the gas disc, in one file | `--snapshot`, `--out`, `--ndisc`, `--sampling`, `--strict`, `--background-grid` |
+
+## GalIC + gas disc workflow
+
+The usual use of this package: a collisionless galaxy (dark halo, bulge, stellar disc) already exists, typically from GalIC, and a
+gas disc is added in the analytic potential of those components. [`examples/galic_gas_disc/`](examples/galic_gas_disc/) has the
+whole workflow twice, with the same parameter file ([`galic_m1.toml`](examples/galic_gas_disc/galic_m1.toml): GalIC Model-M1 plus a gas disc):
+
+* the notebook [`build_gas_disc_ics.ipynb`](examples/galic_gas_disc/build_gas_disc_ics.ipynb) (needs `pip install ".[notebook]"`) goes
+  through it with plots: model and rotation curve, vertical resolution against particle number and temperature, the sampled disc
+  against the model, the snapshot checks, and the written IC file;
+* the command line does the same, step by step or in one go:
+
+```bash
+galaxy-components check   examples/galic_gas_disc/galic_m1.toml            # model, rotation curve, h/H by radius
+galaxy-components add-gas examples/galic_gas_disc/galic_m1.toml --snapshot galic.hdf5 --out ic.hdf5 --strict
+examples/galic_gas_disc/build.sh galic.hdf5 ic.hdf5                         # both (STRICT=1, NDISC=..., BACKGROUND_GRID=1)
+```
+
+`add-gas` first compares the snapshot with the analytic model the gas disc is built in (halo, bulge and stellar-disc mass, the
+stellar disc's scale length and thickness measured from its particles, its spin direction and centre), because the gas is in
+equilibrium only in *that* potential; `--strict` turns a mismatch into an error. It then samples the gas disc, adds it as
+PartType0 and writes one GADGET HDF5 file, optionally with an AREPO background grid. `check` reports the vertical resolution
+(see [Vertical resolution](#what-each-component-models)) and how much lighter the model halo is than GalIC's, since the gas disc is
+taken out of M200 here but is not part of GalIC's halo. The Python functions are in `galaxy_components.workflow`.
 
 ## What each component models
 
@@ -313,6 +343,7 @@ merge.write_merged("merger.hdf5", species, box)
 | `compound` | `truncate_disc`, `excise_halo` (disc ↔ halo pressure balance) |
 | `backgroundgrid` | `add_background_grid` (works on any particle arrays) |
 | `system` | `build_system`, `read_system` |
+| `workflow` | `model_report`, `compare_snapshot`, `add_gas_to_snapshot`, `standin_snapshot` (the GalIC + gas-disc workflow) |
 | `merge` | `place`, `orbit_two_body`, `resolve_gas_overlap`, `stitch`, `finalise`, `merge_from_config` |
 | `io`, `params`, `presets` | HDF5 writer, TOML/namelist parameter reader and writer, ready-made parameter sets |
 

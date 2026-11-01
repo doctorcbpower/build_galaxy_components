@@ -118,6 +118,30 @@ def run_convert(args):
         print(text, end="")
 
 
+def run_check(args):
+    """Background model, gas-disc rotation curve and vertical resolution, without sampling particles."""
+    from . import workflow
+    p = read_params(args.params)
+    if args.ndisc:
+        p.ndisc = args.ndisc
+    print(workflow.model_report(p).format())
+
+
+def run_add_gas(args):
+    """Sample the gas disc and add it to an existing (e.g. GalIC) snapshot."""
+    from . import workflow
+    p = read_params(args.params)
+    if args.ndisc:
+        p.ndisc = args.ndisc
+    if args.sampling:
+        p.sampling = args.sampling
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    workflow.add_gas_to_snapshot(p, args.snapshot, out, seed=args.seed, background_grid=args.background_grid,
+                                 boxsize_factor=args.boxsize_factor, nngb=args.nngb, strict=args.strict)
+    print(f"wrote {out}")
+
+
 def run_merge(args):
     from .merge import merge_from_config
     merge_from_config(args.config, args.outdir, seed=args.seed)
@@ -131,6 +155,22 @@ def main(argv=None):
     cp.add_argument("-o", "--output", help="output .toml file (default: print to stdout)")
     cp.add_argument("--all", action="store_true", help="write every field, not only non-defaults")
     cp.set_defaults(fn=run_convert)
+    kp = sub.add_parser("check", help="gas-disc model: rotation curve, scale heights and vertical resolution")
+    kp.add_argument("params")
+    kp.add_argument("--ndisc", type=int, help="particle number to assess (default: the parameter file's)")
+    kp.set_defaults(fn=run_check)
+    ap_ = sub.add_parser("add-gas", help="add the gas disc to an existing snapshot (e.g. from GalIC)")
+    ap_.add_argument("params")
+    ap_.add_argument("--snapshot", required=True, help="GADGET HDF5 file without gas")
+    ap_.add_argument("--out", required=True, help="output IC file")
+    ap_.add_argument("--ndisc", type=int)
+    ap_.add_argument("--sampling", choices=("poisson", "sobol"))
+    ap_.add_argument("--seed", type=int, default=19721)
+    ap_.add_argument("--strict", action="store_true", help="fail if the snapshot disagrees with the analytic model")
+    ap_.add_argument("--background-grid", action="store_true", help="AREPO background grid")
+    ap_.add_argument("--boxsize-factor", type=float, default=5.0)
+    ap_.add_argument("--nngb", type=int, default=64)
+    ap_.set_defaults(fn=run_add_gas)
     mp = sub.add_parser("merge", help="stitch several systems (TOML config) into one IC file")
     mp.add_argument("config")
     mp.add_argument("--outdir", default=".")

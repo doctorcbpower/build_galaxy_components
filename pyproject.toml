@@ -24,6 +24,7 @@ dependencies = [
 [project.optional-dependencies]
 namelist = ["f90nml"]          # read legacy Fortran namelist parameter files
 test = ["pytest", "f90nml"]
+notebook = ["matplotlib", "jupyterlab"]   # examples/galic_gas_disc/build_gas_disc_ics.ipynb
 
 [project.scripts]
 galaxy-components = "galaxy_components.cli:main"
