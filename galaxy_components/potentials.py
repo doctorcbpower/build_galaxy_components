@@ -116,6 +116,42 @@ class ExponentialDisc(Component):
             out[i] = -GGDT * self.mass * (np.exp(-np.outer(z, k)) @ amp)
         return out
 
+    def menc_sphere(self, r):
+        """Mass inside a sphere of radius r: a razor-thin disc inside r is the disc inside R < r."""
+        x = np.asarray(r, dtype=float) / self.rd
+        return self.mass * (1.0 - (1.0 + x) * np.exp(-x))
+
+    def phi_multipole(self, R, z):
+        """Monopole + quadrupole + hexadecapole potential, exact as r -> infinity.
+
+        Q_l = M <R^l> P_l(0), with <R^2> = 6 Rd^2, <R^4> = 120 Rd^4 for an exponential disc.
+        Relative error ~ (Rd/r)^6 beyond the last term, ~1e-5 at r = 30 Rd.
+        """
+        R = np.asarray(R, dtype=float)
+        z = np.asarray(z, dtype=float)
+        r = np.hypot(R, z)
+        mu = z / r
+        p2 = 0.5 * (3 * mu ** 2 - 1)
+        p4 = (35 * mu ** 4 - 30 * mu ** 2 + 3) / 8
+        q2, q4 = -3.0 * self.mass * self.rd ** 2, 45.0 * self.mass * self.rd ** 4
+        return -GGDT * (self.mass / r + q2 * p2 / r ** 3 + q4 * p4 / r ** 5)
+
+    def phi_grid(self, R, z, rswitch=30.0):
+        """phi on the outer product of R and |z|: the Hankel integral within ``rswitch`` scale
+        lengths (where it is cheap and exact) and the multipole expansion beyond."""
+        R = np.atleast_1d(np.asarray(R, dtype=float))
+        z = np.abs(np.atleast_1d(np.asarray(z, dtype=float)))
+        rr = np.hypot(R[:, None], z[None, :])
+        out = self.phi_multipole(R[:, None], np.maximum(z[None, :], 1e-12))
+        near = rr < rswitch * self.rd
+        ir = np.where(near.any(1))[0]
+        jz = np.where(near.any(0))[0]
+        if ir.size:
+            exact = self.phi(R[ir], z[jz])
+            sub = out[np.ix_(ir, jz)]
+            out[np.ix_(ir, jz)] = np.where(near[np.ix_(ir, jz)], exact, sub)
+        return out
+
     def vc2(self, R):
         """Freeman (1970): vc^2 = 4 pi G Sigma0 Rd y^2 [I0K0 - I1K1], y = R/2Rd."""
         y = 0.5 * np.asarray(R) / self.rd

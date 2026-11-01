@@ -69,6 +69,8 @@ class HaloGas:
     rho: Callable            # rho_gas(r)
     u: Callable              # u_gas(r)
     m_ref: float = 0.0       # dark-halo mass inside r200 used in the potential
+    mdm: Callable = None     # enclosed gravitating mass M(<r) [1e10 Msol] the gas is in equilibrium with
+    redge: float = 0.0       # radius where P = 0 [kpc]; 0 for a free-edge halo
 
     def pressure(self, r):
         return (GAMMA - 1) * self.rho(r) * self.u(r)
@@ -125,7 +127,118 @@ def build_gas_halo(p: Params, ntab=1000, consistent=True, verbose=True) -> HaloG
 
     rho_fn = lambda r: rho0 * rhog(np.asarray(r) / a)
     u_fn = lambda r: temp0 * rhog(np.asarray(r) / a) ** (gam - 1) / U_TO_TEMP / MU_HALO
-    return HaloGas(kind, a, m200, r200, conc, gam, a0, temp0, rho0, mgas, rtab, mtab, utab, rho_fn, u_fn, m_ref)
+    mdm = lambda r: m_ref * _fnorm(kind, np.asarray(r, dtype=float) / a) / fc
+    return HaloGas(kind, a, m200, r200, conc, gam, a0, temp0, rho0, mgas, rtab, mtab, utab, rho_fn, u_fn, m_ref,
+                   mdm)
+
+
+@dataclass
+class DiscHaloGas(HaloGas):
+    """Axisymmetric halo gas in the potential of the dark halo *plus* a fixed exponential disc.
+
+    The gas follows the equation of state of the spherical halo it was built from, P(h), where
+    h = int dP/rho is the enthalpy.  Hydrostatic equilibrium in any potential is h + Phi = const, so
+    with Phi = Phi_dm(r) + Phi_disc(R, z) the enthalpy is h(R, z) = h_dm(r) - [Phi_disc(R, z) -
+    Phi_disc(pole)], h_dm(r) = int_r^R_edge g_dm dr, and the density is rho(h).  The zero-pressure
+    surface is the equipotential through the pole of the old edge.  The disc pulls the gas in towards
+    itself; the gas mass inside r200 is renormalised (an entropy rescale, rho -> s rho, P -> s P).
+    ``rho``/``u``/``pressure`` of this class are averages over angle; use ``*_rz`` for the real thing.
+    """
+    rho_rz: Callable = None
+    pressure_rz: Callable = None
+    mu_grid: np.ndarray = None      # cos(theta) grid on [0, 1]
+    mu_cdf: np.ndarray = None       # (nr, nmu) conditional CDF of cos(theta) at each rtab radius
+    disc: object = None
+
+    def u_rz(self, R, z):
+        rho = self.rho_rz(R, z)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return np.where(rho > 0, self.pressure_rz(R, z) / ((GAMMA - 1) * np.where(rho > 0, rho, 1.0)), 0.0)
+
+    def draw_cos_theta(self, r, rng):
+        """Signed cos(theta) for particles at radii r, from the conditional density at that radius."""
+        i = np.clip(np.searchsorted(self.rtab, r) , 1, len(self.rtab) - 1)
+        i = np.where(np.abs(np.log(r / self.rtab[i - 1])) < np.abs(np.log(r / self.rtab[i])), i - 1, i)
+        rows = self.mu_cdf[i]
+        u = rng.random(len(r))
+        j = np.clip((rows < u[:, None]).sum(1), 1, rows.shape[1] - 1)
+        lo, hi = rows[np.arange(len(r)), j - 1], rows[np.arange(len(r)), j]
+        t = np.where(hi > lo, (u - lo) / np.where(hi > lo, hi - lo, 1.0), 0.0)
+        mu = self.mu_grid[j - 1] + t * (self.mu_grid[j] - self.mu_grid[j - 1])
+        return np.where(rng.random(len(r)) < 0.5, -mu, mu)
+
+
+def adapt_to_disc(halo: HaloGas, disc, nmu=240, ngrid=200, verbose=True) -> DiscHaloGas:
+    """Put the gas of a zero-pressure-edge halo into the potential of halo + ``disc`` (an
+    ``ExponentialDisc``); see ``DiscHaloGas``."""
+    from scipy.interpolate import RegularGridInterpolator
+    log = print if verbose else (lambda *a, **k: None)
+    if halo.redge <= 0 or halo.mdm is None:
+        raise ValueError("halo_feels_disc needs a gas halo with a zero-pressure edge: set halo_zero_edge = true "
+                         "with rtrunc > 1, or use a truncated N-body halo (istaper)")
+    r, lr, redge = halo.rtab, np.log(halo.rtab), halo.redge
+    g = GGDT * halo.mdm(r) / r ** 2
+    cum = integrate.cumulative_simpson(g * r, x=lr, initial=0.0)
+    hdm = np.maximum(np.interp(np.log(redge), lr, cum) - cum, 0.0)          # int_r^redge g dr
+    hdm_of_r = lambda rr: np.interp(np.log(np.maximum(rr, r[0])), lr, hdm, right=0.0)
+    # equation of state of the spherical solution, ascending in h
+    keep = (r > 1e-5 * halo.r200) & (r < redge)
+    h_tab = hdm[keep][::-1]
+    rho_tab = halo.rho(r[keep])[::-1]
+    p_tab = ((GAMMA - 1) * halo.rho(r[keep]) * halo.u(r[keep]))[::-1]
+    h_tab, idx = np.unique(h_tab, return_index=True)
+    rho_tab, p_tab = rho_tab[idx], p_tab[idx]
+    h_tab, rho_tab, p_tab = np.concatenate(([0.0], h_tab)), np.concatenate(([0.0], rho_tab)), np.concatenate(([0.0], p_tab))
+    hc = h_tab[-1]
+
+    def eos(h, tab):
+        h = np.asarray(h, dtype=float)
+        top = tab[-1] * (np.maximum(h, 1e-300) / hc) ** (1.5 if tab is rho_tab else 2.5)   # constant-K continuation
+        return np.where(h <= 0, 0.0, np.where(h <= hc, np.interp(h, h_tab, tab), top))
+
+    # disc potential relative to the pole of the old edge, on a log grid in (R, |z|)
+    lo, hi = 0.02 * disc.rd, 1.3 * redge
+    Rg = np.geomspace(lo, hi, ngrid)
+    phid = disc.phi_grid(Rg, Rg)
+    pole = float(disc.phi_multipole(1e-9 * redge, redge))
+    interp = RegularGridInterpolator((np.log(Rg), np.log(Rg)), phid - pole, bounds_error=False, fill_value=None)
+
+    def dphi(R, z):
+        R, z = np.broadcast_arrays(np.asarray(R, dtype=float), np.asarray(z, dtype=float))
+        pts = np.stack((np.log(np.clip(R, lo, hi)), np.log(np.clip(np.abs(z), lo, hi))), -1)
+        return interp(pts)
+
+    def h_of(R, z):
+        return hdm_of_r(np.hypot(R, z)) - dphi(R, z)
+
+    # mass normalisation inside r200, and the grids used for sampling
+    nr = 600
+    rg = np.geomspace(1e-4 * halo.r200, redge, nr)
+    mu = np.linspace(0.0, 1.0, nmu)
+    RR = rg[:, None] * np.sqrt(1 - mu ** 2)[None, :]
+    ZZ = rg[:, None] * mu[None, :]
+    rho0 = eos(h_of(RR, ZZ), rho_tab)
+    shell = 4 * PI * rg ** 3 * np.trapezoid(rho0, mu, axis=1)               # dM/dlnr
+    menc = integrate.cumulative_simpson(shell, x=np.log(rg), initial=0.0)
+    s = halo.mgas / float(np.interp(halo.r200, rg, menc))
+    rho_tab, p_tab, menc = rho_tab * s, p_tab * s, menc * s
+    rho1 = rho0 * s
+    cdf = integrate.cumulative_trapezoid(rho1, mu, axis=1, initial=0.0)
+    cdf = cdf / np.where(cdf[:, -1:] > 0, cdf[:, -1:], 1.0)
+    rho_rz = lambda R, z: eos(h_of(R, z), rho_tab)
+    p_rz = lambda R, z: eos(h_of(R, z), p_tab)
+    lg = np.log(rg)
+    rho_avg = np.trapezoid(rho1, mu, axis=1)
+    p_avg = np.trapezoid(eos(h_of(RR, ZZ), p_tab), mu, axis=1)
+    u_avg = np.where(rho_avg > 0, p_avg / ((GAMMA - 1) * np.maximum(rho_avg, 1e-300)), 0.0)
+    log(f"Gas halo adapted to the disc (M={disc.mass:g}, Rd={disc.rd:g}): gas mass inside r200 renormalised by "
+        f"{s:.4g}; midplane density at 5 kpc is {float(rho_rz(np.array([5.0]), np.array([0.0]))[0]) / float(halo.rho(5.0)):.3g}"
+        f" x the spherical halo's")
+    return DiscHaloGas(halo.kind, halo.a, halo.m200, halo.r200, halo.conc, halo.gamma_poly, halo.a0, halo.temp0,
+                       halo.rho0, halo.mgas, rg, menc / halo.mgas, u_avg,
+                       lambda rr: np.interp(np.log(np.asarray(rr, dtype=float)), lg, rho_avg),
+                       lambda rr: np.interp(np.log(np.asarray(rr, dtype=float)), lg, u_avg),
+                       halo.m_ref, halo.mdm, halo.redge, rho_rz, p_rz, mu, cdf, disc)
 
 
 def _loglin_interp(rr, r, y, floor=1e-300):
@@ -234,7 +347,8 @@ def add_entropy_core(p: Params, ks: HaloGas, f_core: float, verbose=True, zero_e
     log(f"Halo re-solved ({what}): central density {rho[0] / ks.rho(r[0]):.3g} x K&S; "
         f"P(1 kpc) / K&S = {np.interp(np.log(1.0), lr, pp) / np.interp(np.log(1.0), lr, p_ks):.3g}")
     return HaloGas(ks.kind, ks.a, ks.m200, ks.r200, ks.conc, float("nan"), float("nan"), temp0,
-                   float(rho[0]), ks.mgas, r, cum / target, u, rho_fn, u_fn, ks.m_ref)
+                   float(rho[0]), ks.mgas, r, cum / target, u, rho_fn, u_fn, ks.m_ref,
+                   ks.mdm if mdm is None else mdm, rmax if zero_edge else 0.0)
 
 
 def sample_gas_halo(p: Params, halo: HaloGas, rng, nhalo=None, recentre=False,
@@ -257,11 +371,17 @@ def sample_gas_halo(p: Params, halo: HaloGas, rng, nhalo=None, recentre=False,
 
     m_enc = rng.random(nsample) * fm
     r = np.interp(m_enc, halo.mtab, halo.rtab)
-    x1 = 2.0 * rng.random(nsample) - 1.0
     az = 2 * PI * rng.random(nsample)
-    rc = np.sqrt(1.0 - x1 * x1)
-    pos = r[:, None] * np.column_stack((x1, rc * np.cos(az), rc * np.sin(az)))
-    ug = np.interp(r, halo.rtab, halo.utab)
+    if isinstance(halo, DiscHaloGas):       # axisymmetric: z = r cos(theta) with the conditional density
+        ct = halo.draw_cos_theta(r, rng)
+        rc = np.sqrt(1.0 - ct * ct)
+        pos = r[:, None] * np.column_stack((rc * np.cos(az), rc * np.sin(az), ct))
+        ug = halo.u_rz(np.hypot(pos[:, 0], pos[:, 1]), pos[:, 2])
+    else:
+        x1 = 2.0 * rng.random(nsample) - 1.0
+        rc = np.sqrt(1.0 - x1 * x1)
+        pos = r[:, None] * np.column_stack((x1, rc * np.cos(az), rc * np.sin(az)))
+        ug = np.interp(r, halo.rtab, halo.utab)
     vel = np.zeros_like(pos)
     vel += p.v_radial * pos / r[:, None]
     if velocity_noise:

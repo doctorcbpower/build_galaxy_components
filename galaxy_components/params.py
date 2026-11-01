@@ -76,6 +76,7 @@ class Params:
     halo_type: str = "hernquist"  # 'hernquist' | 'nfw' | 'logarithmic'
     galic: bool = True  # GalIC conventions (total halo mass == mhalo)
     halo_zero_edge: bool = False  # hydrostatic gas out to rtrunc*r200 with P=0 there (Donnert 2013)
+    halo_feels_disc: bool = False  # halo (N-body and gas) equilibrium includes the disc's gravity
     halo_core: float = 0.0  # gas entropy floor, in units of the K&S entropy at r200 (0 = pure K&S)
     # gas-disc mesh (hardcoded in mk_gas_disc.f90)
     nrbin: int = 150
@@ -96,7 +97,7 @@ GROUP_FIELDS = {
     "nbody": ("ncomp", "npart_comp", "fmass_comp", "rscale_comp", "raniso_comp", "beta_comp",
               "rtrunc_comp", "form_comp", "istaper"),
     "output": ("disc_file", "halo_file", "nbody_file", "snap_format"),
-    "model": ("halo_type", "galic", "halo_zero_edge", "halo_core",
+    "model": ("halo_type", "galic", "halo_zero_edge", "halo_core", "halo_feels_disc",
               "nrbin", "nzbin", "log_zmin", "log_zmax", "snap_z"),
 }
 # Fields of the Fortran namelists that this code never used or does not implement.  They are not

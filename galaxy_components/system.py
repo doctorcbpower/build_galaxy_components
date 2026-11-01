@@ -19,6 +19,7 @@ import numpy as np
 from . import compound, gas_disc, gas_halo, nbody
 from .model import build_model
 from .params import Params, read_params
+from .potentials import ExponentialDisc
 
 
 @dataclass
@@ -58,6 +59,15 @@ def build_halo(p, nb=None, legacy_halo=False, halo_core=None, zero_edge=None):
     the gas is in hydrostatic equilibrium in the tapered halo.  ``legacy_halo`` skips this, as the
     Fortran did.
     """
+    halo, pg = _spherical_halo(p, nb, legacy_halo, halo_core, zero_edge)
+    if p.halo_feels_disc and not legacy_halo:
+        model = build_model(p, verbose=False)
+        if model.mdisc > 0:
+            halo = gas_halo.adapt_to_disc(halo, ExponentialDisc(model.mdisc, model.rdisc), verbose=False)
+    return halo, pg
+
+
+def _spherical_halo(p, nb, legacy_halo, halo_core, zero_edge):
     core = p.halo_core if halo_core is None else halo_core
     edge0 = p.halo_zero_edge if zero_edge is None else zero_edge
     if not (p.istaper and p.ncomp > 0) or legacy_halo:

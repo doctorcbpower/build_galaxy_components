@@ -51,6 +51,7 @@ snap_format = 3           # 3 = GADGET HDF5 (the only format written)
 halo_type = "hernquist"   # "hernquist", "nfw" or "logarithmic"
 galic = true              # GalIC conventions for the Hernquist halo
 halo_core = 0.0           # gas entropy floor / K&S entropy at r200 (0 = none; ~0.1 keeps more disc)
+halo_feels_disc = false   # halo (gas and N-body) in equilibrium with the disc's gravity too
 halo_zero_edge = false    # hydrostatic halo gas to rtrunc*r200 with P = 0 at the edge
 # nrbin = 150             # gas-disc mesh (radial rings)
 # nzbin = 500             # gas-disc mesh (vertical points)

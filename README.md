@@ -30,7 +30,7 @@ Python ≥ 3.11. From a clone of this repository:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[test]"        # numpy>=2, scipy>=1.12, h5py (+ pytest, f90nml); editable, so edits take effect
-pytest -q                       # 111 tests, ~1 min
+pytest -q                       # 118 tests, ~1-2 min
 galaxy-components --help        # console script (also: python -m galaxy_components ...)
 ```
 The only required dependencies are `numpy`, `scipy` and `h5py`; `f90nml` is optional and only needed to read legacy Fortran
@@ -88,7 +88,7 @@ The legacy Fortran programs in [`legacy/`](legacy/) still need the namelist form
 | `[black_hole]` | `mbh` | central black-hole mass |
 | `[nbody]` | `ncomp`, `npart_comp`, `fmass_comp`, `form_comp`, `rscale_comp`, `rtrunc_comp`, `raniso_comp`, `beta_comp`, `istaper` | N-body components (`"nfw"`, `"hernquist"`, `"burkert"`); lists are per component, at most 5; `raniso_comp`/`beta_comp` set the velocity anisotropy ([below](#what-each-component-models)) |
 | `[output]` | `disc_file`, `halo_file`, `nbody_file`, `snap_format` | output names; **only HDF5 (`snap_format = 3`) is written** |
-| `[model]` | `halo_type`, `galic`, `halo_core`, `halo_zero_edge`, `nrbin`, `nzbin`, `log_zmin`, `log_zmax`, `snap_z` | options that replaced the Fortran `-D` compile flags, plus the newer ones |
+| `[model]` | `halo_type`, `galic`, `halo_core`, `halo_zero_edge`, `halo_feels_disc`, `nrbin`, `nzbin`, `log_zmin`, `log_zmax`, `snap_z` | options that replaced the Fortran `-D` compile flags, plus the newer ones |
 
 Parameters that the Fortran namelist carried but that nothing used or implemented (`sigma200`, `lambda_b`, `fdecay`, `glass_file`,
 `ispoisson`, `tabfile`, `istabulated`, `exponential_disc`) are not silently accepted: a TOML file that sets one is an error that says
@@ -157,6 +157,27 @@ the disc:
   mass f_b M200 inside r200): for the default NFW halo tapered at 1.5 r200 it is 1.3× colder at 0.5 r200, 2.4× at r200 and 5.7×
   at 1.3 r200, and falls to zero at the edge. `rtrunc` is then set by `rtrunc_comp`; giving a different value is an error, and
   so is a taper radius inside r200. `--legacy` skips this, as the Fortran did.
+* **Halo in the gravity of the disc (`halo_feels_disc = true`).** The disc is a fixed, prescribed mass: exponential in R (mass
+  `mdisc`, scale length `rdisc`), treated as razor-thin. The halo density targets are unchanged and the halo adapts to the deeper
+  potential, as in made-to-measure codes but without iterating.
+  *Gas*: the gas keeps the equation of state P(h) of the spherical solution (h = ∫dP/ρ), and equilibrium in halo + disc is
+  h + Φ = const, so ρ(R, z) = ρ(h(R, z)) with h = h_dm(r) − [Φ_disc(R, z) − Φ_disc(pole of the edge)]. The gas is axisymmetric,
+  hydrostatic to 1–3 % in both R and z (tested), zero at the same edge, and renormalised to f_b M200 inside r200. It needs a
+  zero-pressure edge (`halo_zero_edge` with `rtrunc > 1`, or `istaper`); the compounding rule uses the true P_h(R, z).
+  *N-body*: the disc enters the spherical potential through its enclosed mass (the monopole of its potential), so the halo
+  density is exactly as specified and the distribution function is inverted in halo + disc (sampled halo obeys the radial Jeans
+  equation with the disc mass to 8 %, tested). This under-represents the disc's in-plane pull and does not flatten the halo.
+  How much it matters (default NFW halo tapered at 1.5 r200, K&S entropy shape, disc scale length 0.1 r_s):
+
+  | disc mass / M200 | gas density at 5 kpc | default disc mass surviving pressure confinement |
+  |---|---|---|
+  | 0.02 | × 1.7 | 34 % → 9 % |
+  | 0.04 | × 2.4 | 58 % → 18 % |
+  | 0.10 | × 3.9 | 78 % → 28 % |
+
+  For the 0.10 disc the N-body halo's velocity dispersion at 1–3 kpc rises from 181 to 421 km/s. A hot halo that ignored the disc
+  was much too thin in the centre; a self-consistent one is so dense that a 10⁴ K disc survives only within a few kpc unless
+  the halo entropy is raised (`halo_core`).
 
 | halo (default disc) | disc mass kept | disc outer radius |
 |---|---|---|
@@ -273,7 +294,7 @@ merge.write_merged("merger.hdf5", species, box)
 ## Tests
 
 ```bash
-pytest -q              # everything, ~1 min
+pytest -q              # everything, ~1-2 min
 pytest -q -m smoke     # end-to-end runs of every command and example, ~25 s
 ```
 The physics tests check against analytic results: the exponential-disc potential against the Freeman closed form, the vertical solver

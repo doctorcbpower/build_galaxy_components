@@ -40,6 +40,13 @@ def _safe_pressure(halo: HaloGas, r):
     return np.where(np.isfinite(p), p, 0.0)
 
 
+def _halo_pressure(halo, R, z):
+    """Halo pressure at (R, z): the real axisymmetric one if the halo was adapted to the disc."""
+    if getattr(halo, "pressure_rz", None) is not None:
+        return halo.pressure_rz(R, z)
+    return _safe_pressure(halo, np.hypot(R, z))
+
+
 def truncate_disc(disc: GasDisc, halo: HaloGas):
     """Return a copy of ``disc`` whose vertical/radial mass tables are cut where
     the disc pressure drops to the halo pressure, plus the per-ring mass
@@ -47,7 +54,7 @@ def truncate_disc(disc: GasDisc, halo: HaloGas):
     R = disc.rtab[:, None]
     z = disc.ztab[None, :]
     pd = disc.cs ** 2 * 10 ** disc.lrho
-    ph = _safe_pressure(halo, np.hypot(R, z))
+    ph = _halo_pressure(halo, R, z)
     below = pd < ph
     first_below = np.where(below.any(1), below.argmax(1), disc.ztab.size)
     jc = first_below - 1                      # last z index still disc-dominated, -1 if none
@@ -83,7 +90,7 @@ def excise_halo(pos, disc: GasDisc, halo: HaloGas):
     R = np.hypot(pos[:, 0], pos[:, 1])
     z = pos[:, 2]
     pd = disc_pressure_interpolator(disc)(R, z)
-    ph = _safe_pressure(halo, np.linalg.norm(pos, axis=1))
+    ph = _halo_pressure(halo, R, z)
     return ~(pd >= ph)
 
 

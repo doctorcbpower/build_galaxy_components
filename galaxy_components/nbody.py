@@ -45,8 +45,9 @@ import numpy as np
 from scipy.special import gamma as Gamma
 
 from .constants import GGDT, PI, virial_mass, virial_radius
-from .model import GalaxyModel
+from .model import GalaxyModel, build_model
 from .params import Params
+from .potentials import ExponentialDisc
 
 NTAB = 1000
 FRCUT = 1.05
@@ -304,6 +305,13 @@ def build_nbody(p: Params, verbose=True, legacy=True) -> NBodyModel:
         mtab += menc_tab[i]
     if p.mbh > 0:
         mtab[0] += p.mbh  # (Fortran adds the BH at the first bin only)
+    if p.halo_feels_disc:
+        # The disc enters the spherical potential through its enclosed mass (the monopole of its
+        # potential); the halo density is unchanged, only its distribution function adapts.
+        model = build_model(p, verbose=False)
+        if model.mdisc > 0:
+            mtab += ExponentialDisc(model.mdisc, model.rdisc).menc_sphere(rtab)
+            log(f"Disc ({model.mdisc:g}, Rd={model.rdisc:.4g}) included in the halo potential")
 
     mtot_r200 = np.interp(r200, rtab, mtab)
     rscale1 = rscale[0]
