@@ -38,7 +38,7 @@ Python ≥ 3.11. From a clone of this repository:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[test]"        # numpy>=2, scipy>=1.12, h5py (+ pytest, f90nml); editable, so edits take effect
-pytest -q                       # 131 tests, ~1 min
+pytest -q                       # 134 tests, ~1 min
 galaxy-components --help        # console script (also: python -m galaxy_components ...)
 ```
 The only required dependencies are `numpy`, `scipy` and `h5py`; `f90nml` is optional and only needed to read legacy Fortran
@@ -91,7 +91,7 @@ The legacy Fortran programs in [`legacy/`](legacy/) still need the namelist form
 | `[halo]` | `m200`, `v200`, `c200`, `qflat`, `rcore` | virial mass [10¹⁰ M☉] (or `v200`), concentration; log-halo flattening/core |
 | `[disc]` | `mdisc`, `mstar`, `fdisc`, `fhole`, `fdref`, `sigma0`, `zdisc` | disc mass (>0: fraction of M200; ≤0: absolute), stellar fraction, scale length as a fraction of the halo scale, inner hole, stellar-disc thickness z₀/R_d (GalIC `DiskHeight`; 0 = razor-thin), … |
 | `[bulge]` | `mbulge`, `fbulge` | Hernquist bulge mass and scale |
-| `[gas_disc]` | `temp`, `ndisc` | gas-disc temperature [K], particle count (0 = no gas disc) |
+| `[gas_disc]` | `temp`, `ndisc`, `sampling` | gas-disc temperature [K], particle count (0 = no gas disc), placement `"poisson"` (default) or `"sobol"` (quasi-random: about 3x less density shot noise, same distribution) |
 | `[gas_halo]` | `fbaryon`, `nhalo`, `rtrunc`, `form`, `v_radial` | baryon fraction, particles inside r200 (0 = no gas halo), sampling edge / r200 (set by `rtrunc_comp` when `istaper`), `"nfw"` or `"hernquist"` |
 | `[black_hole]` | `mbh` | central black-hole mass |
 | `[nbody]` | `ncomp`, `npart_comp`, `fmass_comp`, `form_comp`, `rscale_comp`, `rtrunc_comp`, `raniso_comp`, `beta_comp`, `istaper` | N-body components (`"nfw"`, `"hernquist"`, `"burkert"`); lists are per component, at most 5; `raniso_comp`/`beta_comp` set the velocity anisotropy ([below](#what-each-component-models)) |

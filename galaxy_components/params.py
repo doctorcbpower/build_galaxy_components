@@ -50,6 +50,7 @@ class Params:
     # [gas_disc]
     temp: float = 1e4
     ndisc: int = 0
+    sampling: str = "poisson"  # gas-disc particle placement: 'poisson' or 'sobol' (scrambled quasi-random, less shot noise)
     # [gas_halo]
     fbaryon: float = 0.16
     nhalo: int = 0
@@ -92,7 +93,7 @@ GROUP_FIELDS = {
     "halo": ("m200", "v200", "c200", "qflat", "rcore"),
     "disc": ("mdisc", "sigma0", "fdisc", "mstar", "fhole", "fdref", "zdisc"),
     "bulge": ("mbulge", "fbulge"),
-    "gas_disc": ("temp", "ndisc"),
+    "gas_disc": ("temp", "ndisc", "sampling"),
     "gas_halo": ("fbaryon", "nhalo", "v_radial", "rtrunc", "form"),
     "black_hole": ("mbh",),
     "nbody": ("ncomp", "npart_comp", "fmass_comp", "rscale_comp", "raniso_comp", "beta_comp",
@@ -126,6 +127,9 @@ def read_params(path) -> Params:
         raise FileNotFoundError(f"parameter file does not exist: {path}")
     p = _read_toml(path) if path.suffix.lower() == ".toml" else _read_namelist(path)
     p.halo_type = p.halo_type.lower()
+    p.sampling = p.sampling.lower()
+    if p.sampling not in ("poisson", "sobol"):
+        raise ValueError(f"{path}: sampling must be 'poisson' or 'sobol', got {p.sampling!r}")
     return p
 
 

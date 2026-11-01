@@ -10,8 +10,11 @@ rho0 chosen so that 2 * int_0^inf rho dz = Sigma(R).  Sigma(R) is imposed.
 """
 from dataclasses import dataclass
 
+import warnings
+
 import numpy as np
 from scipy import integrate, optimize, special
+from scipy.stats import qmc
 
 from .constants import GAMMA, GGDT, PI, sound_speed
 from .model import GalaxyModel
@@ -238,20 +241,28 @@ def sample_particles(p: Params, disc: GasDisc, ndisc, rng):
     mpart = (mkeep - m0) / ndisc
     print(f"Disc mass to R={rcut:.3f} kpc: {mkeep:.6g}; particle mass {mpart:.4e}")
 
-    # radii by inversion of M(<R), rejecting anything inside the hole
-    r = np.empty(0)
-    row = np.empty(0, dtype=int)
-    while r.size < ndisc:
-        need = int((ndisc - r.size) * 1.2) + 10
-        mt = rng.random(need) * mkeep
-        rr = np.interp(mt, disc.mrtab, rtab)
-        rr = rr[rr >= r0]
-        r = np.concatenate((r, rr))
-    r = r[:ndisc]
+    if p.sampling == "sobol":
+        # scrambled Sobol' points in (mass inside R, vertical quantile, azimuth, side): same
+        # distribution as Poisson sampling with far less shot noise in the SPH/mesh density
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)  # balance properties want a power-of-two N
+            U = qmc.Sobol(4, scramble=True, seed=int(rng.integers(2**32))).random(ndisc)
+        r = np.interp(m0 + U[:, 0] * (mkeep - m0), disc.mrtab, rtab)
+        u, side, phi = U[:, 1], U[:, 3], 2 * PI * U[:, 2]
+    else:
+        # radii by inversion of M(<R), rejecting anything inside the hole
+        r = np.empty(0)
+        while r.size < ndisc:
+            need = int((ndisc - r.size) * 1.2) + 10
+            mt = rng.random(need) * mkeep
+            rr = np.interp(mt, disc.mrtab, rtab)
+            rr = rr[rr >= r0]
+            r = np.concatenate((r, rr))
+        r = r[:ndisc]
+        u, side, phi = rng.random(ndisc), rng.random(ndisc), 2 * PI * rng.random(ndisc)
     row = np.clip(np.searchsorted(rtab, r, side="right") - 1, 0, rtab.size - 1)
 
     # heights by inversion of the normalised vertical mass profile of the ring below
-    u = rng.random(ndisc)
     zabs = np.empty(ndisc)
     for i in np.unique(row):
         sel = row == i
@@ -261,8 +272,7 @@ def sample_particles(p: Params, disc: GasDisc, ndisc, rng):
             zabs[sel] = ztab[j]
         else:
             zabs[sel] = np.exp(np.interp(u[sel], m, np.log(ztab)))
-    z = np.where(rng.random(ndisc) < 0.5, -zabs, zabs)
-    phi = 2 * PI * rng.random(ndisc)
+    z = np.where(side < 0.5, -zabs, zabs)
 
     vc = np.interp(r, rtab, disc.vrot)
     pos = np.column_stack((r * np.cos(phi), r * np.sin(phi), z))

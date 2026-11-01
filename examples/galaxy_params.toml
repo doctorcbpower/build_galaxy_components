@@ -20,6 +20,7 @@ fbulge = 0.0
 [gas_disc]
 temp = 1.0e4              # temperature [K]
 ndisc = 20000             # gas particles in the disc (0 = no gas disc)
+# sampling = "sobol"      # particle placement: "poisson" (default) or "sobol" (quasi-random, less shot noise)
 
 [gas_halo]
 fbaryon = 0.16            # baryon fraction inside r200

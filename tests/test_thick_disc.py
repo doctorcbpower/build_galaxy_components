@@ -93,3 +93,40 @@ def test_zdisc_is_a_toml_parameter(tmp_path):
     f = tmp_path / "p.toml"
     f.write_text("[disc]\nmdisc = 0.04\nzdisc = 0.2\n")
     assert read_params(f).zdisc == 0.2
+
+
+# ---------------------------------------------------------------- Sobol' particle placement
+def _disc(sampling, n=20000, **kw):
+    from galaxy_components import gas_disc
+    from galaxy_components.model import build_model
+    from galaxy_components.params import Params
+    p = Params(v200=200.0, c200=10.0, mdisc=0.035, mstar=0.9, fdisc=0.04, ndisc=n, sampling=sampling, **kw)
+    model = build_model(p, verbose=False)
+    d = gas_disc.build_gas_disc(p, model, verbose=False)
+    return p, d, gas_disc.sample_particles(p, d, n, np.random.default_rng(5))
+
+
+def test_sobol_matches_poisson_distribution():
+    _, d, (pp, *_) = _disc("poisson")
+    _, _, (ps, *_) = _disc("sobol")
+    for q in (0.1, 0.5, 0.9):                        # cylindrical radius and height quantiles agree
+        assert np.quantile(np.hypot(ps[:, 0], ps[:, 1]), q) == pytest.approx(
+            np.quantile(np.hypot(pp[:, 0], pp[:, 1]), q), rel=0.05)
+        assert np.quantile(np.abs(ps[:, 2]), q) == pytest.approx(np.quantile(np.abs(pp[:, 2]), q), rel=0.1)
+    assert abs(np.mean(ps[:, 2])) < 0.05 * np.mean(np.abs(ps[:, 2]))   # symmetric about the plane
+
+
+def test_sobol_respects_hole_and_seed():
+    p, d, (ps, *_) = _disc("sobol", fhole=0.5)
+    assert np.hypot(ps[:, 0], ps[:, 1]).min() >= 0.5 * d.model.rdisc * 0.999
+    a = _disc("sobol", n=2000)[2][0]
+    b = _disc("sobol", n=2000)[2][0]
+    assert np.array_equal(a, b)
+
+
+def test_sampling_option_validated(tmp_path):
+    from galaxy_components.params import read_params
+    f = tmp_path / "p.toml"
+    f.write_text('[gas_disc]\nsampling = "glass"\n')
+    with pytest.raises(ValueError, match="sampling"):
+        read_params(f)
