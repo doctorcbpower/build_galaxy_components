@@ -38,7 +38,7 @@ Python ≥ 3.11. From a clone of this repository:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[test]"        # numpy>=2, scipy>=1.12, h5py (+ pytest, f90nml); editable, so edits take effect
-pytest -q                       # 134 tests, ~1 min
+pytest -q                       # 136 tests, ~1 min
 galaxy-components --help        # console script (also: python -m galaxy_components ...)
 ```
 The only required dependencies are `numpy`, `scipy` and `h5py`; `f90nml` is optional and only needed to read legacy Fortran
@@ -135,6 +135,14 @@ model makes the gas disc far too thin. For a GalIC Model-M1 stellar disc (z₀ =
 the thin-disc Hankel integral plus the exact plane-parallel slab difference 2πGΣ[z₀ ln(2cosh(z/z₀)) − |z|] plus a smooth remainder
 tabulated by convolution (agrees with a brute-force convolution to 0.5 % in φ(z) − φ(0); v_c² equals the numerical derivative of φ to
 0.2 %). The default `zdisc = 0` is unchanged.
+
+**Vertical resolution.** The gas disc's vertical structure is solved in the continuum limit; a particle code only reproduces it if the
+kernel (SPH, 64 neighbours) or cell is small compared with the half-mass height H. When h/H is large the midplane density is
+smoothed away, the pressure force falls short of gravity, and the disc collapses and rebounds. In a periodic-patch SPH test
+(isothermal column, fixed vertical force) the collapse of H was ~0 at h/H = 1, ~7 % at 2 and ~19 % at 4. `sample_particles` therefore
+warns when h/H > 2 (`gas_disc.HRES_MAX`) for more than 5 % of the gas mass, with the radii affected and the `ndisc` that would
+resolve 90 % of the gas (h ∝ N^(-1/3)); `gas_disc.resolution` returns h/H ring by ring. `sampling = "sobol"` reduces the density
+shot noise about 3× but not this smoothing bias; neither a zero-pressure top edge nor matching u to the SPH density helped in the same test.
 
 **N-body components** (`nbody`). Spherical, multi-component Eddington-type inversion. It sees only the N-body
 components themselves: **a disc is neither sampled nor included in its potential**, so the halo is in equilibrium only in

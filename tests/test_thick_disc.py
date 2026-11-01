@@ -130,3 +130,23 @@ def test_sampling_option_validated(tmp_path):
     f.write_text('[gas_disc]\nsampling = "glass"\n')
     with pytest.raises(ValueError, match="sampling"):
         read_params(f)
+
+
+# ---------------------------------------------------------------- vertical resolution warning
+def test_resolution_scales_as_n_to_minus_third():
+    _, d, _ = _disc("poisson", n=1000)
+    mp = d.gas_mass / 1000
+    a = gas_disc.resolution(d, mp)["ratio"]
+    b = gas_disc.resolution(d, mp / 8)["ratio"]
+    assert np.allclose(b, a / 2)
+    assert a.min() > 0 and np.all(np.isfinite(a))
+
+
+def test_resolution_warning_only_when_unresolved():
+    import warnings
+    with pytest.warns(UserWarning, match="under-resolved"):
+        _disc("poisson", n=2000)
+    p, d, _ = _disc("poisson", n=2000)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        gas_disc._warn_resolution(d, d.gas_mass / 1e12, 10 ** 12, 0.0, d.rtab[-1])   # absurdly fine: silent

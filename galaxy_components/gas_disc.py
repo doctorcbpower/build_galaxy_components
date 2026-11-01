@@ -228,6 +228,46 @@ def rotation_curve(p, model, rtab, lrho, sigma0, cs):
     return {"background": v_bg, "gas": v_gas, "pressure": vp, "total": total}
 
 
+# Vertical resolution.  A 64-neighbour SPH kernel (support radius h) or a mesh cell of size ~h/2.5
+# that is large compared with the half-mass height H smooths the midplane density and weakens the
+# pressure force, so the disc collapses and rebounds ("ringing").  In a periodic-patch SPH test the
+# collapse was ~0 at h/H = 1, ~7% at 2 and ~19% at 4, so 2 is the default warning threshold.
+NNGB = 64
+HRES_MAX = 2.0
+
+
+def resolution(disc: GasDisc, mpart, nngb=NNGB, rmin=0.0, rmax=np.inf):
+    """h/H on each ring of the table: kernel support radius at the midplane over the half-mass height.
+
+    h = (3 nngb m / (4 pi rho_mid))^(1/3).  Returns dict(R, ratio, dm) for the rings in [rmin, rmax];
+    ``dm`` is the gas mass of each ring, so a mass-weighted statistic is straightforward.  Since
+    h ~ m^(1/3), ratio scales as ndisc^(-1/3).
+    """
+    k = (disc.rtab >= rmin) & (disc.rtab <= rmax)
+    H = np.array([np.interp(0.5, m, disc.ztab) for m in disc.mztab])
+    h = (3 * nngb * mpart / (4 * PI * disc.rho0)) ** (1 / 3)
+    return dict(R=disc.rtab[k], ratio=(h / H)[k], dm=np.gradient(disc.mrtab)[k])
+
+
+def _warn_resolution(disc, mpart, ndisc, r0, rcut):
+    res = resolution(disc, mpart, rmin=max(r0, disc.rtab[0]), rmax=rcut)
+    R, ratio, dm = res["R"], res["ratio"], res["dm"]
+    bad = ratio > HRES_MAX
+    frac = dm[bad].sum() / dm.sum()
+    if frac < 0.05:
+        return
+    order = np.argsort(ratio)
+    q90 = ratio[order][np.searchsorted(np.cumsum(dm[order]) / dm.sum(), 0.9)]
+    rd = disc.model.rdisc
+    ird = np.argmin(abs(R - rd))
+    warnings.warn(
+        f"gas disc is vertically under-resolved: kernel size / scale height h/H > {HRES_MAX:g} for "
+        f"{100 * frac:.0f}% of the gas mass (R = {R[bad].min() / rd:.2g}-{R[bad].max() / rd:.2g} R_d; "
+        f"h/H = {ratio[ird]:.1f} at R_d, {q90:.1f} at the 90th mass percentile). Expect vertical "
+        f"breathing; ndisc ~ {int(ndisc * (q90 / HRES_MAX) ** 3):,} would resolve 90% of the gas, or "
+        f"raise the temperature so the disc is thicker.", stacklevel=3)
+
+
 def sample_particles(p: Params, disc: GasDisc, ndisc, rng):
     """Draw gas particles; returns pos, vel (float32, N x 3), u, mpart."""
     model, rtab, ztab = disc.model, disc.rtab, disc.ztab
@@ -240,6 +280,7 @@ def sample_particles(p: Params, disc: GasDisc, ndisc, rng):
     m0 = np.interp(r0, rtab, disc.mrtab) if r0 > 0 else 0.0
     mpart = (mkeep - m0) / ndisc
     print(f"Disc mass to R={rcut:.3f} kpc: {mkeep:.6g}; particle mass {mpart:.4e}")
+    _warn_resolution(disc, mpart, ndisc, r0, rcut)
 
     if p.sampling == "sobol":
         # scrambled Sobol' points in (mass inside R, vertical quantile, azimuth, side): same
