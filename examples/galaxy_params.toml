@@ -36,6 +36,9 @@ fmass_comp = [1.0]        # mass in units of M200
 form_comp = ["nfw"]       # "nfw", "hernquist" or "burkert"
 rscale_comp = [1.0]       # scale radius in units of r200/c200
 rtrunc_comp = [2.0]       # truncation radius in units of r200
+# Velocity anisotropy (default isotropic); at most one of these per component:
+# raniso_comp = [2.0]     # Osipkov-Merritt radius in units of r200/c200 (radially biased outskirts)
+# beta_comp = [-0.3]      # constant beta in (-0.5, 0.5); negative = tangential
 istaper = true
 
 [output]

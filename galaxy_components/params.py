@@ -63,7 +63,8 @@ class Params:
     npart_comp: list = field(default_factory=lambda: [0] * NCOMP_MAX)
     fmass_comp: list = field(default_factory=lambda: [0.0] * NCOMP_MAX)
     rscale_comp: list = field(default_factory=lambda: [0.0] * NCOMP_MAX)
-    raniso_comp: list = field(default_factory=lambda: [0.0] * NCOMP_MAX)
+    raniso_comp: list = field(default_factory=lambda: [0.0] * NCOMP_MAX)  # Osipkov-Merritt radius / rs (0 = off)
+    beta_comp: list = field(default_factory=lambda: [0.0] * NCOMP_MAX)    # constant anisotropy beta (0 = isotropic)
     rtrunc_comp: list = field(default_factory=lambda: [0.0] * NCOMP_MAX)
     form_comp: list = field(default_factory=lambda: [""] * NCOMP_MAX)
     istaper: bool = False
@@ -100,14 +101,15 @@ GROUP_FIELDS = {
     "gas_disc": ("temp", "ndisc"),
     "gas_halo": ("fbaryon", "nhalo", "lambda_b", "v_radial", "rtrunc", "form"),
     "black_hole": ("mbh",),
-    "nbody": ("ncomp", "npart_comp", "fmass_comp", "rscale_comp", "raniso_comp", "rtrunc_comp",
-              "form_comp", "istaper", "fdecay"),
+    "nbody": ("ncomp", "npart_comp", "fmass_comp", "rscale_comp", "raniso_comp", "beta_comp",
+              "rtrunc_comp", "form_comp", "istaper", "fdecay"),
     "output": ("disc_file", "halo_file", "nbody_file", "snap_format"),
     "misc": ("glass_file", "ispoisson", "tabfile", "istabulated"),
     "model": ("halo_type", "galic", "exponential_disc", "halo_zero_edge", "halo_core",
               "nrbin", "nzbin", "log_zmin", "log_zmax", "snap_z"),
 }
-_LIST_FIELDS = ("npart_comp", "fmass_comp", "rscale_comp", "raniso_comp", "rtrunc_comp", "form_comp")
+_LIST_FIELDS = ("npart_comp", "fmass_comp", "rscale_comp", "raniso_comp", "beta_comp", "rtrunc_comp",
+                "form_comp")
 _TYPES = {f.name: f.type for f in fields(Params)}
 _FIELD_GROUP = {name: g for g, names in GROUP_FIELDS.items() for name in names}
 

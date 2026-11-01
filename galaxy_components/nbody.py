@@ -14,6 +14,21 @@ mass profile; each component's f(E) is then obtained from
 Quadratures that were Romberg/midpoint calls in Fortran are done exactly on the
 piecewise-linear / log-linear interpolants the Fortran integrands implied.
 
+Velocity anisotropy (per component, in the parameter file):
+
+  * ``raniso_comp = r_a / rs`` -- Osipkov-Merritt, beta(r) = r^2/(r^2 + r_a^2): isotropic in
+    the centre, radially biased outside.  f depends on Q = E - L^2/(2 r_a^2) and is found by
+    the same Eddington inversion applied to rho_Q = (1 + r^2/r_a^2) rho.
+  * ``beta_comp = beta`` -- constant beta in (-1/2, 1/2), radial or tangential:
+    f(E, L) = L^(-2 beta) g(E), with g from a generalised Abel inversion of r^(2 beta) rho,
+
+        g(E) = [K Gamma(a) Gamma(g)]^-1 int_0^E (d^2 R/dPsi^2) (E-Psi)^(g-1) dPsi,
+        R = r^(2 beta) rho,  a = 3/2 - beta,  g = 1/2 + beta,  K = 2 pi 2^(1/2-beta) sqrt(pi) G(1-beta)/G(3/2-beta)
+
+    (beta = 0 reduces to Eddington's formula).  Surface terms at Psi = 0 are dropped for the
+    constant-beta model; they vanish for a tapered or r^-3 halo.
+  At most one of the two may be set per component; both zero is the isotropic model.
+
 Known Fortran quirks and what we do about them (``legacy`` flag):
   * drptab edge extrapolation mixes in dptab differences (legacy keeps this)
   * the potential at the sampled radius is extrapolated from the wrong
@@ -23,9 +38,11 @@ Known Fortran quirks and what we do about them (``legacy`` flag):
   * `rs` in the f(E) prefactor is the *last* component's scale radius (we use
     component 1's, consistent with the Psi normalisation; only a constant)
 """
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.special import gamma as Gamma
 
 from .constants import GGDT, PI, virial_mass, virial_radius
 from .model import GalaxyModel
@@ -167,6 +184,45 @@ def _fabel_integral(etab, ptab_asc, g_asc):
     return out
 
 
+def _abel_integral(etab, ptab_asc, g_asc, gam):
+    """For each E: int_0^E g(Psi) (E-Psi)^(gam-1) dPsi with g piecewise linear (exact), 0 < gam < 1."""
+    p0, p1 = ptab_asc[:-1], ptab_asc[1:]
+    g0, g1 = g_asc[:-1], g_asc[1:]
+    b = (g1 - g0) / (p1 - p0)
+    a = g0 - b * p0
+    out = np.empty(etab.size)
+    for n, E in enumerate(etab):
+        hi = np.minimum(p1, E)
+        lo = np.minimum(p0, E)
+        ok = hi > lo
+        u_hi, u_lo = E - lo[ok], E - hi[ok]
+        c = a[ok] + b[ok] * E
+        G = lambda u: c * u ** gam / gam - b[ok] * u ** (gam + 1) / (gam + 1)
+        out[n] = np.sum(G(u_hi) - G(u_lo))
+    return out
+
+
+def beta_prefactor(beta):
+    """1 / (K Gamma(a) Gamma(gamma)) for the constant-beta inversion (1/(sqrt(8) pi^2) at beta = 0)."""
+    B = np.sqrt(PI) * Gamma(1 - beta) / Gamma(1.5 - beta)
+    K = 2 * PI * B * 2 ** (0.5 - beta)
+    return 1.0 / (K * Gamma(1.5 - beta) * Gamma(0.5 + beta))
+
+
+def clipping_effect(etab, f, expo, menc_row, ptab):
+    """Largest fractional change of rho(Psi) if the negative part of f were dropped.
+
+    rho(Psi) is rebuilt from f+ and f- separately (kernel (Psi-E)^(expo-1)); only radii holding all
+    but 1e-5 of the component's mass are considered.  0 means f >= 0 where it matters.
+    """
+    pos = _abel_integral(etab, etab, np.where(f > 0, f, 0.0), expo)
+    neg = _abel_integral(etab, etab, np.where(f < 0, -f, 0.0), expo)
+    mfrac = menc_row / menc_row[-1]
+    lo, hi = np.interp(1.0 - 1e-5, mfrac, ptab), np.interp(1e-5, mfrac, ptab)
+    rel = (etab >= lo) & (etab <= hi) & (pos > 0)
+    return float(np.max(neg[rel] / pos[rel])) if rel.any() else 0.0
+
+
 @dataclass
 class NBodyModel:
     rtab: np.ndarray
@@ -181,6 +237,8 @@ class NBodyModel:
     vscale: float           # sqrt(G mtot / rscale1)  [km/s]
     r200: float
     m200: float
+    kinds: tuple = ()       # per component: "iso", "om" or "beta"
+    aniso: tuple = ()       # per component: r_a [kpc] (om), beta (beta), 0 (iso)
 
 
 def build_nbody(p: Params, verbose=True, legacy=True) -> NBodyModel:
@@ -217,11 +275,14 @@ def build_nbody(p: Params, verbose=True, legacy=True) -> NBodyModel:
     for i, k in enumerate(kinds):
         rho_comp[i] = get_rho0(k, mass_comp[i], r200, rscale[i])
         if p.istaper:
-            # taper_mass_profile runs before rscale_comp is applied: it uses the global
-            # NFW rs = r200/c200 for the slope and rhodm, not the component scale (kept)
-            sl = slope(k, rtrunc[i], rs)
+            # The Fortran taper_mass_profile runs before rscale_comp is applied and so uses the global
+            # NFW scale rs = r200/c200 for the slope and density at the truncation radius.  For a
+            # component with a different scale that makes its density discontinuous at rtrunc and its
+            # distribution function negative, so use the component's own scale.  (Identical for a single
+            # component with rscale_comp = 1, which is what the Fortran comparison covers.)
+            sl = slope(k, rtrunc[i], rscale[i])
             rstar[i] = -rtrunc[i] / (2.0 + sl)
-            rho_at_rt = rho_profile(k, rtrunc[i], mass_comp[i], rs, r200, galic=True)
+            rho_at_rt = rho_profile(k, rtrunc[i], mass_comp[i], rscale[i], r200, galic=True)
             rhostar[i] = rho_at_rt * np.exp(-2.0 - sl)
             rhotab[i] = rho_trunc(k, rtab, rscale[i], rho_comp[i], rtrunc[i], rstar[i], rhostar[i])
         else:
@@ -253,8 +314,32 @@ def build_nbody(p: Params, verbose=True, legacy=True) -> NBodyModel:
     # relative potential Psi(r) = (rscale/mtot) int_r^rmax M/r'^2 dr'
     ptab = _tail_potential(rtab, mtab) * rscale1 / mtot
 
+    # anisotropy: the inversion is applied to an effective density (see module docstring)
+    kinds, aniso = [], []
+    rho_eff = rhotab.copy()
+    for i in range(ncomp):
+        ra, beta = p.raniso_comp[i], p.beta_comp[i]
+        if ra < 0:
+            raise ValueError(f"raniso_comp[{i}] must be >= 0")
+        if ra > 0 and beta != 0:
+            raise ValueError(f"component {i + 1}: set raniso_comp (Osipkov-Merritt) or beta_comp, not both")
+        if ra > 0:
+            kinds.append("om")
+            aniso.append(ra * rs)
+            rho_eff[i] = rhotab[i] * (1.0 + (rtab / (ra * rs)) ** 2)
+        elif beta != 0:
+            if not -0.5 < beta < 0.5:
+                raise ValueError(f"beta_comp[{i}] = {beta}: the constant-beta inversion is implemented for "
+                                 "-1/2 < beta < 1/2 (a cusp rho ~ r^-1 cannot be more radial than beta = 1/2)")
+            kinds.append("beta")
+            aniso.append(float(beta))
+            rho_eff[i] = rhotab[i] * rtab ** (2 * beta)
+        else:
+            kinds.append("iso")
+            aniso.append(0.0)
+
     # derivatives of rho wrt ln r, 1st and 2nd (4th order)
-    drtab = _stencil(rhotab, dlr)
+    drtab = _stencil(rho_eff, dlr)
     ddrtab = _stencil(drtab, dlr)
 
     dptab = rtab ** 2 / GGDT / mtab
@@ -274,11 +359,111 @@ def build_nbody(p: Params, verbose=True, legacy=True) -> NBodyModel:
     pasc = ptab[::-1]
     ftab = np.empty((ncomp, NTAB))
     for i in range(ncomp):
-        ftab[i] = _fabel_integral(etab, pasc, drhopsi[i][::-1]) / np.sqrt(8.0) / PI ** 2
-        ftab[i][ftab[i] <= 1e-12] = 0.0
+        if kinds[i] == "iso":
+            raw_iso = _fabel_integral(etab, pasc, drhopsi[i][::-1]) / np.sqrt(8.0) / PI ** 2
+            effect = clipping_effect(etab, raw_iso, 1.5, menc_tab[i], ptab)
+            if effect > 0.01:
+                warnings.warn(f"component {i + 1}: the isotropic distribution function is negative where it matters "
+                              f"(clipping it to zero changes the component's density by up to {100 * effect:.2g} %), "
+                              "so the sampled component will not reproduce its density profile. This usually means "
+                              "a centrally concentrated or sharply truncated component sitting in a much more "
+                              "massive halo.", RuntimeWarning, stacklevel=2)
+            ftab[i] = raw_iso
+            ftab[i][ftab[i] <= 1e-12] = 0.0
+            continue
+        if kinds[i] == "om":
+            raw = _fabel_integral(etab, pasc, drhopsi[i][::-1]) / np.sqrt(8.0) / PI ** 2
+            # surface term (1/sqrt(Q)) d rho_Q/dPsi |_0 : nonzero for an untapered r^-3 halo (rho_Q ~ Psi)
+            b_code = -drtab[i, -3] * rtab[-3] / (rscale1 * mtab[-3])
+            raw = raw + b_code / np.sqrt(8.0) / PI ** 2 / np.sqrt(etab)
+        else:
+            beta = aniso[i]
+            raw = beta_prefactor(beta) * _abel_integral(etab, pasc, drhopsi[i][::-1], 0.5 + beta)
+        # A negative f means the anisotropy is not realisable.  Tiny negative dips (numerical noise in the
+        # second derivative, at energies that carry no mass) are harmless, so judge by the effect on the
+        # density: refuse only if dropping f- would change rho by > 0.1 %.
+        expo = 1.5 if kinds[i] == "om" else 1.5 - aniso[i]
+        worst = clipping_effect(etab, raw, expo, menc_tab[i], ptab)
+        if worst > 1e-3:
+            raise ValueError(f"component {i + 1}: the {kinds[i]} distribution function is negative "
+                             f"(clipping it would change the density by {100 * worst:.2g} %), so this anisotropy "
+                             "is not realisable for this density profile; "
+                             + ("increase raniso_comp" if kinds[i] == "om" else "reduce |beta_comp|"))
+        raw[raw < 0] = 0.0
+        ftab[i] = raw
+        log(f"component {i + 1}: {'Osipkov-Merritt r_a = %.4g kpc' % aniso[i] if kinds[i] == 'om' else 'constant beta = %g' % aniso[i]}")
 
     return NBodyModel(rtab, mtab, menc_tab, ptab, etab, ftab, mass_comp, rscale, mtot,
-                      np.sqrt(GGDT * mtot / rscale1), r200, m200)
+                      np.sqrt(GGDT * mtot / rscale1), r200, m200, tuple(kinds), tuple(aniso))
+
+
+def _local_frame(pos):
+    """Orthonormal (e_r, e_1, e_2) at each position."""
+    er = pos / np.linalg.norm(pos, axis=1)[:, None]
+    ref = np.where(np.abs(er[:, :1]) < 0.9, np.array([[1.0, 0, 0]]), np.array([[0, 1.0, 0]]))
+    e1 = ref - np.sum(ref * er, axis=1)[:, None] * er
+    e1 /= np.linalg.norm(e1, axis=1)[:, None]
+    return er, e1, np.cross(er, e1)
+
+
+def _sample_s(table_e, table_f, phi, expo, rng, chunk=20000, sgrid=192, smin=1e-9):
+    """Draw s = Psi - E with density proportional to f(Psi - s) s^expo on (smin*Psi, Psi].
+
+    Proposals are log-uniform in s and are accepted against a per-particle maximum found on a
+    log grid, so the cost stays O(1) draws however steeply f rises towards the deepest energies
+    (a cusp makes f span ~12 decades, which defeats a uniform velocity-box proposal).
+    """
+    n = len(phi)
+    out = np.empty(n)
+    lg = np.log(smin)
+    grid = np.exp(lg * (1.0 - (np.arange(sgrid) + 0.5) / sgrid))          # fractions of Psi, log-spaced
+    f = lambda e: np.interp(e, table_e, table_f, left=0.0)
+    for lo in range(0, n, chunk):
+        ph = phi[lo:lo + chunk]
+        sg = ph[:, None] * grid[None, :]
+        hmax = 1.3 * (f(ph[:, None] - sg) * sg ** (expo + 1.0)).max(axis=1)   # x s: log-uniform proposal ~ 1/s
+        if np.any(hmax <= 0):
+            raise RuntimeError("distribution function vanishes at a sampled radius")
+        res = np.empty(len(ph))
+        todo = np.arange(len(ph))
+        for _ in range(2000):
+            sv = ph[todo] * np.exp(lg * rng.random(todo.size))
+            h = f(ph[todo] - sv) * sv ** (expo + 1.0)
+            ok = h > hmax[todo] * rng.random(todo.size)
+            res[todo[ok]] = sv[ok]
+            todo = todo[~ok]
+            if not todo.size:
+                break
+        else:
+            raise RuntimeError("rejection sampling did not converge (check the distribution function)")
+        out[lo:lo + chunk] = res
+    return out
+
+
+def _velocities_om(nb, i, radius, phi, ra, rng):
+    """Osipkov-Merritt velocities.  With u = v_r^2/2, w = k v_t^2/2, k = 1 + r^2/r_a^2, Q = Psi - u - w
+    and d^3v = (2 pi/k) dw du / sqrt(2u):  p(Q) ~ f(Q) sqrt(Psi-Q), and for fixed s = Psi-Q the split
+    u : w has density ~ u^(-1/2), i.e. u = s U^2."""
+    n = len(radius)
+    k = 1.0 + (radius / ra) ** 2
+    s = _sample_s(nb.etab, nb.ftab[i], phi, 0.5, rng)
+    u = s * rng.random(n) ** 2
+    vr = np.sqrt(2.0 * u) * np.where(rng.random(n) < 0.5, -1.0, 1.0)
+    vt = np.sqrt(2.0 * (s - u) / k)
+    psi = 2 * PI * rng.random(n)
+    return vr, vt * np.cos(psi), vt * np.sin(psi)
+
+
+def _velocities_beta(nb, i, phi, beta, rng):
+    """Constant beta: f d^3v ~ g(E) v^(2-2b) sin^(1-2b)(eta) dv d(eta), so the angle eta from the
+    radial direction separates from the speed; with s = v^2/2 the speed density is g(Psi-s) s^(1/2-b)."""
+    n = len(phi)
+    eta_grid = np.linspace(0.0, PI, 4001)
+    w = np.sin(eta_grid) ** (1.0 - 2.0 * beta)
+    cdf = np.concatenate(([0.0], np.cumsum(0.5 * (w[1:] + w[:-1]) * np.diff(eta_grid))))
+    eta = np.interp(rng.random(n), cdf / cdf[-1], eta_grid)
+    speed = np.sqrt(2.0 * _sample_s(nb.etab, nb.ftab[i], phi, 0.5 - beta, rng))
+    return speed * np.cos(eta), speed * np.sin(eta)
 
 
 def sample_nbody(p: Params, nb: NBodyModel, rng, verbose=True):
@@ -293,32 +478,50 @@ def sample_nbody(p: Params, nb: NBodyModel, rng, verbose=True):
         # radii: invert the cumulative mass
         radius = np.interp(rng.random(n) * mtot_c, nb.menc_tab[i], nb.rtab)
         phi = np.interp(radius, nb.rtab, nb.ptab)
-        fmax = np.interp(phi, nb.etab, nb.ftab[i])  # f at E=Psi (v=0)
+        kind = nb.kinds[i] if nb.kinds else "iso"
         vel = np.zeros((n, 3))
-        todo = np.arange(n)
-        attempts = np.zeros(n, dtype=int)
-        while todo.size:
-            vesc = np.sqrt(2.0 * phi[todo])
-            v = (2.0 * rng.random((todo.size, 3)) - 1.0) * vesc[:, None]
-            e = phi[todo] - 0.5 * np.sum(v * v, axis=1)
-            ok = (e > 0) & (e >= nb.etab[0]) & (e <= nb.etab[-1])
-            fs = np.interp(e, nb.etab, nb.ftab[i])
-            ok &= fs > fmax[todo] * rng.random(todo.size)
-            vel[todo[ok]] = v[ok]
-            attempts[todo] += 1
-            todo = todo[~ok]
-            # Fortran restarts with a new radius after 1000 failed attempts
-            redo = todo[attempts[todo] > 1000]
-            if redo.size:
-                radius[redo] = np.interp(rng.random(redo.size) * mtot_c, nb.menc_tab[i], nb.rtab)
-                phi[redo] = np.interp(radius[redo], nb.rtab, nb.ptab)
-                fmax[redo] = np.interp(phi[redo], nb.etab, nb.ftab[i])
-                attempts[redo] = 0
+        if kind == "iso":
+            fmax = np.interp(phi, nb.etab, nb.ftab[i])  # f at E=Psi (v=0)
+            todo = np.arange(n)
+            attempts = np.zeros(n, dtype=int)
+            while todo.size:
+                vesc = np.sqrt(2.0 * phi[todo])
+                v = (2.0 * rng.random((todo.size, 3)) - 1.0) * vesc[:, None]
+                e = phi[todo] - 0.5 * np.sum(v * v, axis=1)
+                ok = (e > 0) & (e >= nb.etab[0]) & (e <= nb.etab[-1])
+                fs = np.interp(e, nb.etab, nb.ftab[i])
+                ok &= fs > fmax[todo] * rng.random(todo.size)
+                vel[todo[ok]] = v[ok]
+                attempts[todo] += 1
+                todo = todo[~ok]
+                # Fortran restarts with a new radius after 1000 failed attempts
+                redo = todo[attempts[todo] > 1000]
+                if redo.size:
+                    radius[redo] = np.interp(rng.random(redo.size) * mtot_c, nb.menc_tab[i], nb.rtab)
+                    phi[redo] = np.interp(radius[redo], nb.rtab, nb.ptab)
+                    fmax[redo] = np.interp(phi[redo], nb.etab, nb.ftab[i])
+                    attempts[redo] = 0
+        if kind != "iso":
+            for _ in range(50):
+                bad = np.interp(phi, nb.etab, nb.ftab[i]) <= 0
+                if not bad.any():
+                    break
+                radius[bad] = np.interp(rng.random(bad.sum()) * mtot_c, nb.menc_tab[i], nb.rtab)
+                phi[bad] = np.interp(radius[bad], nb.rtab, nb.ptab)
         # isotropic directions
         x1 = 2.0 * rng.random(n) - 1.0
         az = 2 * PI * rng.random(n)
         rc = np.sqrt(1.0 - x1 * x1)
         pos = radius[:, None] * np.column_stack((x1, rc * np.cos(az), rc * np.sin(az)))
+        if kind != "iso":      # velocities in the local frame (e_r, e_1, e_2) at each position
+            er, e1, e2 = _local_frame(pos)
+            if kind == "om":
+                vr, v1, v2 = _velocities_om(nb, i, radius, phi, nb.aniso[i], rng)
+            else:
+                vr, vt = _velocities_beta(nb, i, phi, nb.aniso[i], rng)
+                psi = 2 * PI * rng.random(n)
+                v1, v2 = vt * np.cos(psi), vt * np.sin(psi)
+            vel = vr[:, None] * er + v1[:, None] * e1 + v2[:, None] * e2
         out.append({"pos": pos.astype(np.float32),
                     "vel": (vel * nb.vscale).astype(np.float32),
                     "mpart": mpart, "radius": radius})
@@ -336,3 +539,25 @@ def summarise(nb, comps):
     return {"nvir": int(sel.sum()), "com": x.mean(0), "vcom": v.mean(0),
             "sigma": v.std(0), "sigma_tot": np.sqrt(v.var(0).sum()),
             "vr": vr.mean(), "sigma_r": vr.std()}
+
+
+def measure_beta(pos, vel, edges):
+    """Anisotropy beta = 1 - (s_theta^2 + s_phi^2)/(2 s_r^2) in radial bins.
+
+    Returns (r_mid, beta, n_per_bin); second moments about zero (the halo has no mean flow).
+    """
+    pos = np.asarray(pos, dtype=float)
+    vel = np.asarray(vel, dtype=float)
+    r = np.linalg.norm(pos, axis=1)
+    vr = np.sum(vel * pos, axis=1) / r
+    vt2 = np.sum(vel ** 2, axis=1) - vr ** 2
+    idx = np.digitize(r, edges) - 1
+    mid, beta, cnt = [], [], []
+    for b in range(len(edges) - 1):
+        sel = idx == b
+        if sel.sum() < 20:
+            mid.append(np.nan), beta.append(np.nan), cnt.append(int(sel.sum()))
+            continue
+        mid.append(np.exp(np.mean(np.log(r[sel])))), cnt.append(int(sel.sum()))
+        beta.append(1.0 - 0.5 * np.mean(vt2[sel]) / np.mean(vr[sel] ** 2))
+    return np.array(mid), np.array(beta), np.array(cnt)

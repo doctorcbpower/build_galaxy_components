@@ -30,7 +30,7 @@ Python ≥ 3.11. From a clone of this repository:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[test]"        # numpy>=2, scipy>=1.12, h5py (+ pytest, f90nml); editable, so edits take effect
-pytest -q                       # 72 tests, ~20 s
+pytest -q                       # 97 tests, ~50 s
 galaxy-components --help        # console script (also: python -m galaxy_components ...)
 ```
 The only required dependencies are `numpy`, `scipy` and `h5py`; `f90nml` is optional and only needed to read legacy Fortran
@@ -86,7 +86,7 @@ The legacy Fortran programs in [`legacy/`](legacy/) still need the namelist form
 | `[gas_disc]` | `temp`, `ndisc` | gas-disc temperature [K], particle count (0 = no gas disc) |
 | `[gas_halo]` | `fbaryon`, `nhalo`, `rtrunc`, `form`, `lambda_b`, `v_radial` | baryon fraction, particles inside r200 (0 = no gas halo), sampling edge / r200, `"nfw"` or `"hernquist"` |
 | `[black_hole]` | `mbh` | central black-hole mass |
-| `[nbody]` | `ncomp`, `npart_comp`, `fmass_comp`, `form_comp`, `rscale_comp`, `rtrunc_comp`, `raniso_comp`, `istaper`, `fdecay` | N-body components (`"nfw"`, `"hernquist"`, `"burkert"`); lists are per component, at most 5 |
+| `[nbody]` | `ncomp`, `npart_comp`, `fmass_comp`, `form_comp`, `rscale_comp`, `rtrunc_comp`, `raniso_comp`, `beta_comp`, `istaper`, `fdecay` | N-body components (`"nfw"`, `"hernquist"`, `"burkert"`); lists are per component, at most 5; `raniso_comp`/`beta_comp` set the velocity anisotropy ([below](#what-each-component-models)) |
 | `[output]` | `disc_file`, `halo_file`, `nbody_file`, `snap_format` | output names; **only HDF5 (`snap_format = 3`) is written** |
 | `[misc]` | `glass_file`, `ispoisson`, `tabfile`, `istabulated` | `ispoisson` must be `true` (glass-file sampling is not ported) |
 | `[model]` | `halo_type`, `galic`, `exponential_disc`, `halo_core`, `halo_zero_edge`, `nrbin`, `nzbin`, `log_zmin`, `log_zmax`, `snap_z` | options that replaced the Fortran `-D` compile flags, plus the newer ones |
@@ -116,10 +116,26 @@ exponential. The gas's own gravity enters only through that local vertical term 
 formula; the rotation curve is v_rot² = v_c²(background) + v_c²(gas) + c_s² dlnρ_mid/dlnR. All rings are solved together
 with a vectorised RK4 (≈ 2 s for the default mesh). The stellar-disc potential is a Hankel-transform integral.
 
-**N-body components** (`nbody`). Spherical, isotropic, multi-component Eddington inversion. It sees only the N-body
+**N-body components** (`nbody`). Spherical, multi-component Eddington-type inversion. It sees only the N-body
 components themselves: **a disc is neither sampled nor included in its potential**, so the halo is in equilibrium only in
 isolation and is perturbed when a disc is added (a true disc + halo equilibrium needs a made-to-measure code such as GalIC).
 The gas disc is a perturbation on it, not a self-consistent partner.
+
+*Velocity anisotropy.* By default each component is isotropic. Two exact anisotropic equilibria are available, set per component
+in `[nbody]` (at most one of the two for a component):
+
+| setting | model | β(r) | valid range |
+|---|---|---|---|
+| `raniso_comp = [r_a/r_s, …]` | Osipkov–Merritt, f = f(Q), Q = E − L²/2r_a² | r²/(r² + r_a²): isotropic centre, radial outskirts | β ≥ 0; for an NFW cusp r_a ≳ 0.5 r_s |
+| `beta_comp = [β, …]` | constant anisotropy, f = L^(−2β) g(E) | β at all radii, **radial or tangential** | −½ < β < ½; a cored profile cannot be radially biased |
+
+Both reuse the existing inversion on an effective density (ρ(1 + r²/r_a²) or r^(2β)ρ; for constant β the Abel kernel exponent
+becomes ½ + β) and are sampled exactly, in a local frame along r̂ (the isotropic path is unchanged bit for bit). A distribution function
+that would go negative is refused with an explanation (the test is whether dropping the negative part would change the density by
+more than 0.1 %). Measured from samples, β(r) follows the target to ≈ 0.01 where there are enough particles, and the radial Jeans
+equation holds to ≈ 1 %, i.e. these are real equilibria, not just correct second moments.
+The isotropic path now also *warns* if its distribution function is negative where it matters (it used to clip it silently).
+`raniso_comp` is in units of r_s = r200/c200; `beta_comp` is a Python-only field (the Fortran namelist reader would reject it).
 
 **Gas halo** (`halo`). Komatsu & Seljak (2001) polytropic gas, hydrostatic in the dark halo, with Γ matched at r200. With the
 default `consistent` mode the gas halo sits in the **same dark halo the disc and N-body parts use**; `--legacy` reproduces the
@@ -215,6 +231,7 @@ The package is a set of independent modules, so any piece can be reused on its o
 | [`04_background_grid.py`](examples/04_background_grid.py) | AREPO background grid for **any** gas particles (`--input` an HDF5 file) |
 | [`05_stitch_systems.py`](examples/05_stitch_systems.py) | two galaxies, Kepler orbit, interface resolution, stitching |
 | [`06_custom_potential.py`](examples/06_custom_potential.py) | compose potentials; reuse the hydrostatic solver for your own Φ(R,z) |
+| [`07_anisotropic_halo.py`](examples/07_anisotropic_halo.py) | radially / tangentially biased halos (Osipkov–Merritt, constant β) and measured β(r) |
 
 ```python
 import numpy as np
@@ -246,12 +263,14 @@ merge.write_merged("merger.hdf5", species, box)
 ## Tests
 
 ```bash
-pytest -q              # everything, ~20 s
-pytest -q -m smoke     # end-to-end runs of every command and example, ~13 s
+pytest -q              # everything, ~50 s
+pytest -q -m smoke     # end-to-end runs of every command and example, ~25 s
 ```
 The physics tests check against analytic results: the exponential-disc potential against the Freeman closed form, the vertical solver
 against the isothermal sech² sheet, hydrostatic balance of every halo variant, conservation in the background grid, the Kepler orbit's
 energy and angular momentum, and the N-body distribution function against a fresh run of the Fortran `mk_nbody_comps` (agreement < 1 %).
+The anisotropic halos are checked by measuring β(r) from samples, the radial Jeans equation, the r_a → ∞ and β → 0 limits (which must reproduce the isotropic
+f with the same normalisation) and the refusal of unrealisable models.
 The smoke tests run each command and example on tiny inputs and check the files they write (consistent header, finite values,
 unique IDs, particles inside the box). There is no Fortran oracle for the disc: the Fortran `mk_gas_disc` crashes with an
 out-of-bounds read in `fintrp` (`legacy/mk_gas_disc.f90`, `xp(0)`).
@@ -265,6 +284,8 @@ out-of-bounds read in `fintrp` (`legacy/mk_gas_disc.f90`, `xp(0)`).
 | parameter file | Fortran namelist | TOML (namelists still read; `convert` command) |
 | gas halo potential | `a = r200/c200`, mass `M200` | same dark halo as the disc (`--legacy` restores) |
 | N-body potential interpolation | extrapolates from the wrong table segment | interpolates correctly |
+| N-body taper, several components | taper computed with the global NFW scale, so a component with another scale gets a discontinuous density and a negative f | each component's own scale (identical for one component with `rscale_comp = 1`) |
+| negative isotropic f | clipped silently | warning when it changes the density by > 1 % |
 | N-body velocity scale | `√(G·mass_comp(1)/r_scale)` | `√(G·mtot/r_scale)` (identical for NFW/Burkert) |
 | N-body `drptab` edge fill | mixes in `dptab` differences | same by default; `--fix-legacy` corrects |
 | disc vertical positions | snapped to the 500-point z table | interpolated (`snap_z` restores) |
@@ -275,7 +296,10 @@ out-of-bounds read in `fintrp` (`legacy/mk_gas_disc.f90`, `xp(0)`).
 
 ## Limitations
 
-* No disc in the N-body potential (see above); systems are superposed, not re-equilibrated, apart from the gas pressure-balance rules.
+* N-body halos are spherical (no disc in the potential, no rotation) and the anisotropy is Osipkov–Merritt or constant β in (−½, ½) only. The isotropic sampler
+  measures β ≈ −0.14 in the innermost ~0.05 r_s (about 0.1 % of the particles; probably its radius-redraw rule, not investigated); the anisotropic samplers recover
+  their target there to ≈ 0.05.
+* Systems are superposed, not re-equilibrated, apart from the gas pressure-balance rules.
 * Glass-file sampling (`ispoisson=.false.`) and Gadget binary output are not ported; `form_comp='general'` is not supported.
 * `read_tabulated` for a tabulated halo profile is a verbatim port that could not be tested (no data file).
 * The AREPO output has not been run in AREPO.

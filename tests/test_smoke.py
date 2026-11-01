@@ -222,7 +222,8 @@ def test_check_ic_is_not_vacuous(tmp_path):
 # ------------------------------------------------------------------ the standalone module examples
 EXAMPLES = [("01_gas_disc.py", True, {0}), ("02_gas_halo.py", False, None),
             ("03_nbody_halo.py", False, None), ("04_background_grid.py", True, {0}),
-            ("05_stitch_systems.py", True, {0, 1, 2}), ("06_custom_potential.py", False, None)]
+            ("05_stitch_systems.py", True, {0, 1, 2}), ("06_custom_potential.py", False, None),
+            ("07_anisotropic_halo.py", False, None)]
 
 
 @pytest.mark.parametrize("script,writes,types", EXAMPLES)
@@ -298,3 +299,25 @@ def test_example_toml_runs_a_system(tmp_path):
     s = build_system(ROOT / "examples" / "galaxy_params.toml", "x",
                      overrides=dict(ndisc=300, nhalo=500, npart_comp=[800, 0, 0, 0, 0], nrbin=30, nzbin=150))
     assert set(s.species) == {0, 1}
+
+
+# ------------------------------------------------------------------ anisotropy from parameter files
+@pytest.mark.parametrize("fmt,text", [
+    ("toml", '[halo]\nm200 = 100.0\n[nbody]\nncomp = 1\nnpart_comp = [4000]\nfmass_comp = [1.0]\n'
+             'form_comp = ["nfw"]\nrscale_comp = [1.0]\nrtrunc_comp = [2.0]\nistaper = true\nbeta_comp = [-0.25]\n'),
+    ("nml", "&HALO\nm200=100.\nc200=10.\n/\n&NBODY\nncomp=1\nnpart_comp(1)=4000\nfmass_comp(1)=1.\n"
+            "form_comp(1)='nfw'\nrscale_comp(1)=1.\nrtrunc_comp(1)=2.\nraniso_comp(1)=2.0\nistaper=.true.\n/\n"),
+])
+def test_anisotropy_through_the_cli(tmp_path, fmt, text):
+    path = tmp_path / ("p.toml" if fmt == "toml" else "p.txt")
+    path.write_text(text)
+    main(["nbody", str(path), "--outdir", str(tmp_path)])
+    out = tmp_path / "nbody.gdt.hdf5"
+    check_ic(out, {1})
+    with h5py.File(out) as f:
+        x, v = f["PartType1/Coordinates"][:].astype(float), f["PartType1/Velocities"][:].astype(float)
+    r = np.linalg.norm(x, axis=1)
+    vr = (v * x).sum(1) / r
+    outer = r > np.median(r)
+    beta = 1 - 0.5 * np.mean((v ** 2).sum(1)[outer] - vr[outer] ** 2) / np.mean(vr[outer] ** 2)
+    assert (beta < -0.1) if fmt == "toml" else (beta > 0.2)       # tangential vs radially biased outskirts
