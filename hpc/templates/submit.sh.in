@@ -1,0 +1,9 @@
+#!/bin/bash
+# Submit the IC job, then the Arepo job once the ICs exist.
+set -euo pipefail
+cd "$(dirname "$0")"
+ICS=$(sbatch --parsable make_ics.sbatch)
+ICS=${ICS%%;*}
+echo "IC job $ICS"
+AREPO=$(sbatch --parsable --dependency=afterok:"$ICS" arepo.sbatch)
+echo "Arepo job ${AREPO%%;*} (starts when the IC job succeeds)"

@@ -225,8 +225,10 @@ def stitch(systems, type_maps=None, verbose=True):
     return merged
 
 
-def finalise(species, background_grid=False, boxsize_factor=5.0, nngb=64, verbose=True):
-    """Optionally convert the gas to an AREPO background-grid mesh.  Returns (species, boxsize)."""
+def finalise(species, background_grid=False, boxsize_factor=5.0, nngb=64, verbose=True, suggest_out=None):
+    """Optionally convert the gas to an AREPO background-grid mesh.  Returns (species, boxsize).
+
+    If ``suggest_out`` is a dict it receives the AREPO parameter suggestions (BoxSize, ReferenceGasPartMass, ...)."""
     if not background_grid:
         return species, 0.0
     if 0 not in species:
@@ -239,7 +241,16 @@ def finalise(species, background_grid=False, boxsize_factor=5.0, nngb=64, verbos
     out[0] = dict(pos=bgo["pos"], vel=bgo["vel"], mass=bgo["mass"], ug=bgo["u"])
     if verbose:
         print("AREPO suggestions:", bgo["suggest"])
+    if suggest_out is not None:
+        suggest_out.update(bgo["suggest"])
     return dict(sorted(out.items())), bgo["boxsize"]
+
+
+def write_arepo_suggestions(ic_path, suggest):
+    """Write the AREPO parameter suggestions next to the IC file as ``<ic_path>.arepo.json``."""
+    import json
+    if suggest:
+        Path(str(ic_path) + ".arepo.json").write_text(json.dumps(suggest, indent=2))
 
 
 def write_merged(path, species, boxsize=0.0, double=None, verbose=True):
@@ -359,9 +370,11 @@ def merge_from_config(cfg_path, outdir=".", seed=None, verbose=True):
     maps = [{int(a): int(b) for a, b in sc.get("type_map", {}).items()} or None for sc in cfg["system"]]
     species = stitch(placed, maps, verbose=verbose)
     bg = cfg.get("background_grid", {})
+    suggest = {}
     species, boxsize = finalise(species, bg.get("enabled", False), bg.get("boxsize_factor", 5.0),
-                                bg.get("nngb", 64), verbose=verbose)
+                                bg.get("nngb", 64), verbose=verbose, suggest_out=suggest)
     out = Path(outdir) / cfg.get("output", "merged.hdf5")
     out.parent.mkdir(parents=True, exist_ok=True)
     write_merged(out, species, boxsize, verbose=verbose)
+    write_arepo_suggestions(out, suggest)
     return out

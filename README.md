@@ -26,7 +26,7 @@ params.toml ──► disc     gas disc in hydrostatic equilibrium (analytic pot
 ```
 
 ## Contents
-[Install](#install) · [Quick start](#quick-start) · [Parameter file](#parameter-file) · [Commands](#commands) · [GalIC + gas disc](#galic--gas-disc-workflow) ·
+[Install](#install) · [Quick start](#quick-start) · [Parameter file](#parameter-file) · [Commands](#commands) · [GalIC + gas disc](#galic--gas-disc-workflow) · [Running on a cluster](#running-on-a-cluster-arepo) ·
 [What each component models](#what-each-component-models) · [Merging systems](#merging-systems) ·
 [Use the modules directly](#use-the-modules-directly) · [Tests](#tests) · [Differences from the Fortran](#differences-from-the-fortran) ·
 [Limitations](#limitations) · [References](#references)
@@ -38,7 +38,7 @@ Python ≥ 3.11. From a clone of this repository:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[test]"        # numpy>=2, scipy>=1.12, h5py (+ pytest, f90nml); editable, so edits take effect
-pytest -q                       # 152 tests (one needs jupyter), ~2 min
+pytest -q                       # 161 tests (one needs jupyter), ~2 min
 galaxy-components --help        # console script (also: python -m galaxy_components ...)
 ```
 The only required dependencies are `numpy`, `scipy` and `h5py`; `f90nml` is optional and only needed to read legacy Fortran
@@ -147,6 +147,19 @@ equilibrium only in *that* potential; `--strict` turns a mismatch into an error.
 PartType0 and writes one GADGET HDF5 file, optionally with an AREPO background grid. `check` reports the vertical resolution
 (see [Vertical resolution](#what-each-component-models)) and how much lighter the model halo is than GalIC's, since the gas disc is
 taken out of M200 here but is not part of GalIC's halo. The Python functions are in `galaxy_components.workflow`.
+
+## Running on a cluster (Arepo)
+
+[`hpc/`](hpc/) generates a run directory with two SLURM jobs, one that builds the ICs with a background grid and writes the Arepo parameter
+file from them, and one that runs Arepo on them (submitted with a dependency). Three ready-made cases: a hot halo plus background grid, the
+same plus a cold gas disc, and a GalIC snapshot plus hot halo plus cold gas disc plus background grid.
+
+```bash
+cp hpc/cluster.env.example hpc/ozstar.env       # account, modules, Python environment, Arepo binary, resources
+python hpc/setup_run.py --galaxy hpc/cases/hot_halo_disc/galaxy.toml --run hpc/cases/hot_halo_disc/run.toml \
+    --cluster hpc/ozstar.env --run-dir $SCRATCH/hot_halo_disc --submit             # --scale 0.002 for a quick test
+```
+See [`hpc/README.md`](hpc/README.md) for the cases, what to check first, and the caveat that the Arepo parameter file is an untested starting point.
 
 ## What each component models
 
@@ -384,6 +397,7 @@ out-of-bounds read in `fintrp` (`legacy/mk_gas_disc.f90`, `xp(0)`).
 | negative isotropic f | clipped silently | warning when it changes the density by > 1 % |
 | isotropic velocity sampling | uniform velocity box, restart at a new radius after 1000 failures (depletes a cusp) | the exact sampler of the anisotropic path at β = 0 |
 | N-body velocity scale | `√(G·mass_comp(1)/r_scale)` | `√(G·mtot/r_scale)` (identical for NFW/Burkert) |
+| N-body energy grid | logarithmic in E: σ is 0.45× Jeans at r = 0.004 r_s in a cusp | one node per radial node (`egrid="log"` restores) |
 | N-body `drptab` edge fill | mixes in `dptab` differences | same by default; `--fix-legacy` corrects |
 | disc vertical positions | snapped to the 500-point z table | interpolated (`snap_z` restores) |
 | disc rotation curve | last radius reads past the array (`i.lt.nr` bug) | fixed |
@@ -397,7 +411,6 @@ out-of-bounds read in `fintrp` (`legacy/mk_gas_disc.f90`, `xp(0)`).
   monopole (enclosed mass), which under-represents its in-plane pull and does not flatten the halo, so it is a first approximation
   for light discs. A proper disc response is deliberately left to dedicated codes (see Scope). The anisotropy is Osipkov–Merritt or constant β in (−½, ½) only. The isotropic sampler
   measures β ≈ −0.14 in the innermost ~0.05 r_s (about 0.1 % of the particles; probably its radius-redraw rule, not investigated); the anisotropic samplers recover
-| N-body energy grid | logarithmic in E: σ is 0.45× Jeans at r = 0.004 r_s in a cusp | one node per radial node (`egrid="log"` restores) |
   their target there to ≈ 0.05.
 * Systems are superposed, not re-equilibrated, apart from the gas pressure-balance rules.
 * Glass-file sampling and Gadget binary output are not ported; `form_comp='general'` is not supported.

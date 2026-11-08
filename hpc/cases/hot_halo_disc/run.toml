@@ -1,0 +1,16 @@
+[run]
+name = "hot_halo_disc"
+t_end_gyr = 5.0
+n_snapshots = 50
+max_timestep_myr = 2.0
+
+[ics]
+background_grid = true
+boxsize_factor = 5.0
+nngb = 64
+seed = 19721
+
+[arepo]
+softening_gas = 0.1       # kpc: the disc scale height is tens of pc, so use the finest softening the run can afford
+softening_dm = 1.0
+softening_stars = 0.5

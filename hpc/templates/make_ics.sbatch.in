@@ -1,0 +1,26 @@
+#!/bin/bash
+#SBATCH --job-name=@NAME@_ics
+#SBATCH --account=@ACCOUNT@
+#SBATCH --partition=@PARTITION@
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=@IC_CPUS@
+#SBATCH --mem=@IC_MEM@
+#SBATCH --time=@IC_TIME@
+#SBATCH --output=@RUN_DIR@/logs/ics_%j.out
+# Build the initial conditions with galaxy-components, then write the Arepo parameter file from them.
+# Plain bash: it can also be run directly (bash make_ics.sbatch) on a login node for a small test.
+set -euo pipefail
+
+@MODULE_LINES@
+@ENV_LINE@
+
+cd @RUN_DIR@
+mkdir -p ICs
+export OMP_NUM_THREADS=@IC_CPUS@
+
+@IC_COMMAND@
+
+python3 @SETUP_PY@ --render-arepo @RUN_DIR@
+echo "ICs:  @RUN_DIR@/ICs/ic.hdf5"
+echo "Arepo parameter file: @RUN_DIR@/arepo_param.txt"

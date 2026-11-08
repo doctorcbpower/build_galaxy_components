@@ -1,0 +1,24 @@
+# Case 1: a hot gas halo in a dark halo (both particles) in a box of low-density background-grid cells.
+# 1e12 Msol halo; units kpc, km/s, 1e10 Msol.  Gas and dark matter are in the same NFW halo, tapered at 1.5 r200
+# (the gas ends there with zero pressure and is re-solved in the tapered potential).
+[halo]
+m200 = 100.0
+c200 = 10.0
+
+[gas_halo]
+fbaryon = 0.16            # baryon fraction inside r200
+nhalo = 1000000           # gas particles
+form = "nfw"
+
+[nbody]
+ncomp = 1
+npart_comp = [1000000]    # dark matter particles
+fmass_comp = [1.0]        # mass in units of M200 (no disc here)
+form_comp = ["nfw"]
+rscale_comp = [1.0]
+rtrunc_comp = [1.5]
+istaper = true
+
+[model]
+halo_type = "nfw"
+halo_core = 0.1           # entropy floor: a gas core instead of a cooling-flow cusp

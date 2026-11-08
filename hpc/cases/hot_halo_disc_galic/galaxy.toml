@@ -1,0 +1,35 @@
+# Case 3: GalIC Model-M1 (dark matter + bulge + stellar disc particles from GalIC) plus a hot gas halo, a cold gas disc
+# built in its analytic potential, and a background grid.  The collisionless particles are NOT built here: set
+# [run] snapshot in run.toml to your GalIC snapshot.  Same model as examples/galic_gas_disc/galic_m1.toml, plus the halo.
+#   galaxy-components check hpc/cases/hot_halo_disc_galic/galaxy.toml      # rotation curve and vertical resolution
+[halo]
+v200 = 200.0              # GalIC V200
+c200 = 10.0               # GalIC CC
+
+[disc]
+mdisc = 0.04375           # stars (GalIC MD = 0.035) + gas (25 % of that), in M200
+mstar = 0.8               # stellar fraction
+fdisc = 0.1281            # R_d / Hernquist a: REPLACE by the scale length GalIC reports (4.42 kpc is the Mo, Mao & White estimate)
+zdisc = 0.2               # GalIC DiskHeight
+
+[bulge]
+mbulge = 0.05             # GalIC MB
+fbulge = 0.1              # GalIC BulgeSize
+
+[gas_disc]
+temp = 1.0e4
+ndisc = 1000000           # ~1.9e6 would resolve 90 % of this disc vertically at 1e4 K; see `galaxy-components check`
+sampling = "sobol"
+
+[gas_halo]
+fbaryon = 0.16
+nhalo = 2000000
+rtrunc = 1.5              # the gas halo ends here (r200 units) with zero pressure
+form = "hernquist"
+
+[model]
+halo_type = "hernquist"   # GalIC convention: M200 is the Hernquist total mass
+galic = true
+halo_core = 0.1
+halo_zero_edge = true
+halo_feels_disc = true

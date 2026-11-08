@@ -87,7 +87,7 @@ def run_halo(args):
 
 def run_galaxy(args):
     """One system (disc + halo gas + N-body) in one file, optionally with an AREPO background grid."""
-    from .merge import finalise, write_merged
+    from .merge import finalise, write_arepo_suggestions, write_merged
     from .system import build_system
     out = Path(args.outdir)
     out.mkdir(parents=True, exist_ok=True)
@@ -97,8 +97,11 @@ def run_galaxy(args):
                         zero_edge=True if args.zero_edge else None,
                         legacy_halo=args.legacy_halo, cold_halo=args.cold_halo,
                         nbody_components=not args.no_nbody, verbose=True)
-    species, boxsize = finalise(sysm.species, args.background_grid, args.boxsize_factor, args.nngb)
-    write_merged(out / (args.name or "galaxy_ic.hdf5"), species, boxsize)
+    suggest = {}
+    species, boxsize = finalise(sysm.species, args.background_grid, args.boxsize_factor, args.nngb, suggest_out=suggest)
+    path = out / (args.name or "galaxy_ic.hdf5")
+    write_merged(path, species, boxsize)
+    write_arepo_suggestions(path, suggest)
 
 
 def run_system(args):
@@ -185,11 +188,11 @@ def main(argv=None):
         if name == "nbody":
             sp.add_argument("--fix-legacy", action="store_true",
                             help="correct Fortran edge-extrapolation quirk instead of reproducing it")
+            sp.add_argument("--log-egrid", action="store_true",
+                            help="Fortran energy grid (logarithmic in E) instead of one node per radial node")
         if name in ("halo", "galaxy", "system"):
             sp.add_argument("--halo-core", type=float, default=None,
                             help="gas entropy floor / K&S entropy at r200 (overrides &MODEL halo_core)")
-            sp.add_argument("--log-egrid", action="store_true",
-                            help="Fortran energy grid (logarithmic in E) instead of one node per radial node")
             sp.add_argument("--zero-edge", action="store_true",
                             help="hydrostatic halo to rtrunc*r200 with zero pressure at the edge (Donnert 2013)")
         if name == "halo":

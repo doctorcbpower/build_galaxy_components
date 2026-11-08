@@ -15,7 +15,7 @@ import numpy as np
 
 from . import gas_disc
 from .io import write_hdf5
-from .merge import finalise, stitch, write_merged
+from .merge import finalise, stitch, write_arepo_suggestions, write_merged
 from .model import build_model
 from .system import System, read_system
 
@@ -167,8 +167,10 @@ def add_gas_to_snapshot(p, snapshot, out, seed=19721, background_grid=False, box
     pos, vel, ug, mpart = gas_disc.sample_particles(p, disc, p.ndisc, np.random.default_rng(seed))
     gas = System("gas_disc", {0: dict(pos=pos, vel=vel, ug=ug, mass=mpart)})
     species = stitch([snap, gas], verbose=verbose)
-    species, boxsize = finalise(species, background_grid, boxsize_factor, nngb, verbose=verbose)
+    suggest = {}
+    species, boxsize = finalise(species, background_grid, boxsize_factor, nngb, verbose=verbose, suggest_out=suggest)
     write_merged(out, species, boxsize, verbose=verbose)
+    write_arepo_suggestions(out, suggest)
     return dict(out=out, findings=findings, counts={t: len(s["pos"]) for t, s in species.items()}, boxsize=boxsize)
 
 

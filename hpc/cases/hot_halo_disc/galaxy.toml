@@ -1,0 +1,36 @@
+# Case 2: hot gas halo + a cold (1e4 K) gas disc + dark matter particles + background grid.
+# All baryons are gas, so the model is self-consistent in Arepo: the disc has no stellar component (mstar = 0).
+# Disc mass 0.3 % of M200 = 3e9 Msol keeps the cold disc Toomre-stable at the centre (see disc_parameters.txt from
+# `galaxy-components disc` for Q(R)); a heavier gas-only disc fragments.
+[halo]
+m200 = 100.0
+c200 = 10.0
+
+[disc]
+mdisc = 0.003             # gas disc mass / M200
+mstar = 0.0               # no stellar disc: the whole disc is gas
+fdisc = 0.15              # scale length / r_s  (= 3 kpc)
+
+[gas_disc]
+temp = 1.0e4
+ndisc = 500000
+sampling = "sobol"        # quasi-random placement: less density shot noise
+
+[gas_halo]
+fbaryon = 0.16
+nhalo = 1000000
+form = "nfw"
+
+[nbody]
+ncomp = 1
+npart_comp = [1000000]
+fmass_comp = [0.997]      # 1 - mdisc: the dark halo of the model the disc was built in
+form_comp = ["nfw"]
+rscale_comp = [1.0]
+rtrunc_comp = [1.5]
+istaper = true
+
+[model]
+halo_type = "nfw"
+halo_core = 0.1
+halo_feels_disc = true    # the gas halo and dark matter are in equilibrium with the disc's gravity too

@@ -1,0 +1,96 @@
+%  Arepo parameter file written by galaxy-components hpc/setup_run.py.
+%
+%  A STARTING POINT, NOT A VALIDATED SET: parameter names and defaults differ between Arepo versions and
+%  depend on the options your binary was compiled with (Config.sh).  Check every entry against your
+%  Arepo's example parameter file, or point [arepo] param_template in run.toml at your own template using
+%  the placeholders written as at-sign, NAME, at-sign below.  Units: kpc, km/s, 1e10 Msol (code time = 0.978 Gyr).
+
+%----  files
+InitCondFile                  @IC_FILE@
+OutputDir                     @OUTPUT_DIR@
+SnapshotFileBase              snap
+OutputListFilename            empty.txt
+ICFormat                      3
+SnapFormat                    3
+NumFilesPerSnapshot           1
+NumFilesWrittenInParallel     @NWRITE@
+
+%----  CPU time / restarts
+ResubmitOn                    0
+ResubmitCommand               none
+TimeLimitCPU                  @TIMELIMIT_CPU@
+CpuTimeBetRestartFile         3600
+MaxMemSize                    2000
+
+%----  time and output
+TimeBegin                     0.0
+TimeMax                       @TIME_MAX@
+ComovingIntegrationOn         0
+PeriodicBoundariesOn          1
+BoxSize                       @BOXSIZE@
+OutputListOn                  0
+TimeBetSnapshot               @TIME_BET_SNAP@
+TimeOfFirstSnapshot           0.0
+TimeBetStatistics             0.1
+Omega0                        0.0
+OmegaLambda                   0.0
+OmegaBaryon                   0.0
+HubbleParam                   1.0
+
+%----  units
+UnitLength_in_cm              3.085678e21
+UnitMass_in_g                 1.989e43
+UnitVelocity_in_cms           1.0e5
+GravityConstantInternal       0
+
+%----  accuracy of time integration and gravity
+TypeOfTimestepCriterion       0
+ErrTolIntAccuracy             0.012
+CourantFac                    0.3
+MaxSizeTimestep               @MAX_DT@
+MinSizeTimestep               0.0
+TypeOfOpeningCriterion        1
+ErrTolTheta                   0.7
+ErrTolForceAcc                0.0025
+TreeDomainUpdateFrequency     0.1
+MultipleDomains               8
+TopNodeFactor                 4
+ActivePartFracForNewDomainDecomp 0.01
+
+%----  hydrodynamics
+CoolingOn                     0
+StarformationOn               0
+InitGasTemp                   0
+MinGasTemp                    100.0
+MinEgySpec                    0.0
+LimitUBelowThisDensity        0.0
+LimitUBelowCertainDensityToThisValue 0.0
+
+%----  mesh refinement: keep cells close to the mass of the gas particles (the background grid is the low-density filler)
+ReferenceGasPartMass          @REF_GAS_MASS@
+TargetGasMassFactor           1
+RefinementCriterion           1
+DerefinementCriterion         1
+MinimumComovingHydroSoftening @SOFT_GAS@
+AdaptiveHydroSofteningSpacing 1.2
+GasSoftFactor                 2.5
+
+%----  gravitational softening (kpc): type 0 gas, type 1 dark matter, types 2-4 stars
+SofteningComovingType0        @SOFT_GAS@
+SofteningComovingType1        @SOFT_DM@
+SofteningComovingType2        @SOFT_STARS@
+SofteningComovingType3        @SOFT_STARS@
+SofteningComovingType4        @SOFT_STARS@
+SofteningComovingType5        @SOFT_STARS@
+SofteningMaxPhysType0         @SOFT_GAS@
+SofteningMaxPhysType1         @SOFT_DM@
+SofteningMaxPhysType2         @SOFT_STARS@
+SofteningMaxPhysType3         @SOFT_STARS@
+SofteningMaxPhysType4         @SOFT_STARS@
+SofteningMaxPhysType5         @SOFT_STARS@
+SofteningTypeOfPartType0      0
+SofteningTypeOfPartType1      1
+SofteningTypeOfPartType2      2
+SofteningTypeOfPartType3      2
+SofteningTypeOfPartType4      2
+SofteningTypeOfPartType5      2

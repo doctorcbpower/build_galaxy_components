@@ -1,0 +1,32 @@
+#!/bin/bash
+#SBATCH --job-name=@NAME@_arepo
+#SBATCH --account=@ACCOUNT@
+#SBATCH --partition=@PARTITION@
+#SBATCH --nodes=@AREPO_NODES@
+#SBATCH --ntasks-per-node=@AREPO_NTASKS_PER_NODE@
+#SBATCH --mem-per-cpu=@AREPO_MEM_PER_CPU@
+#SBATCH --time=@AREPO_TIME@
+#SBATCH --output=@RUN_DIR@/logs/arepo_%j.out
+# Run Arepo on the ICs.  If the job runs out of time, resubmit this script: it restarts from the restart files.
+set -euo pipefail
+
+@MODULE_LINES@
+@ENV_LINE@
+
+cd @RUN_DIR@
+mkdir -p output
+
+AREPO_BIN="@AREPO_BIN@"
+if [[ -z "$AREPO_BIN" || ! -x "$AREPO_BIN" ]]; then
+    echo "AREPO_BIN is not set to an executable (edit the cluster file and set it up again, or edit this script)" >&2
+    exit 1
+fi
+[[ -s ICs/ic.hdf5 && -s arepo_param.txt ]] || { echo "ICs or arepo_param.txt missing: run make_ics.sbatch first" >&2; exit 1; }
+
+RESTART=""
+if [[ -e output/restartfiles/restart.0 ]]; then
+    RESTART=1                      # Arepo restart flag
+    echo "restarting from output/restartfiles"
+fi
+
+@LAUNCHER@ "$AREPO_BIN" arepo_param.txt $RESTART

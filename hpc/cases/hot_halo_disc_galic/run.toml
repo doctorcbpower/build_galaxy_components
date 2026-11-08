@@ -1,0 +1,17 @@
+[run]
+name = "hot_halo_disc_galic"
+snapshot = ""             # REQUIRED: path to the GalIC HDF5 snapshot (halo, disc, bulge; no gas)
+t_end_gyr = 5.0
+n_snapshots = 50
+max_timestep_myr = 2.0
+
+[ics]
+background_grid = true
+boxsize_factor = 5.0
+nngb = 64
+seed = 19721
+
+[arepo]
+softening_gas = 0.1
+softening_dm = 0.5
+softening_stars = 0.1
