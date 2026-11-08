@@ -87,12 +87,13 @@ def test_sampled_halo_obeys_the_jeans_equation(models, name):
 
 
 def test_isotropic_output_is_unchanged():
-    """Regression guard: the isotropic path must reproduce the pre-anisotropy sample exactly."""
+    """Regression guard for the isotropic sampler (pinned after it switched from the Fortran velocity-box
+    rejection to the exact sampler: 193.857 -> 193.802, i.e. 0.03 %, statistically the same halo)."""
     p = read_params(DATA / "nbody_ref_params.txt")
     nb = nbody.build_nbody(p, verbose=False)
     c = nbody.sample_nbody(p, nb, np.random.default_rng(19721), verbose=False)
     assert nb.kinds == ("iso",)
-    assert nbody.summarise(nb, c)["sigma_tot"] == pytest.approx(193.85696362276994, rel=1e-12)
+    assert nbody.summarise(nb, c)["sigma_tot"] == pytest.approx(193.80221386399668, rel=1e-12)
 
 
 def test_limits_reduce_to_the_isotropic_distribution_function():
@@ -121,8 +122,9 @@ def test_generalised_abel_integral_reduces_to_the_eddington_kernel():
 
 @pytest.mark.parametrize("kw,fragment", [
     (dict(raniso_comp=[1.0, 0, 0, 0, 0], beta_comp=[0.2, 0, 0, 0, 0]), "not both"),
-    (dict(beta_comp=[0.6, 0, 0, 0, 0]), "-1/2 < beta < 1/2"),
-    (dict(beta_comp=[-0.7, 0, 0, 0, 0]), "-1/2 < beta < 1/2"),
+    (dict(beta_comp=[0.6, 0, 0, 0, 0]), "-1/2 < beta <= 1/2"),
+    (dict(beta_comp=[-0.7, 0, 0, 0, 0]), "-1/2 < beta <= 1/2"),
+    (dict(beta_comp=[-0.5, 0, 0, 0, 0]), "-1/2 < beta <= 1/2"),
     (dict(raniso_comp=[-1.0, 0, 0, 0, 0]), ">= 0"),
     (dict(raniso_comp=[0.05, 0, 0, 0, 0]), "not realisable"),         # far too radial for an NFW cusp
     (dict(form_comp=["burkert", "", "", "", ""], beta_comp=[0.3, 0, 0, 0, 0]), "not realisable"),   # a core cannot be radial
@@ -182,3 +184,66 @@ def test_negative_isotropic_distribution_function_warns(monkeypatch):
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         nbody.build_nbody(make(n=1000), verbose=False)
+
+
+# ---------------------------------------------------------------- cusps: beta = 1/2, mass fill, energy grid
+def _nfw(n, **kw):
+    p = make(n=n, **kw)
+    return p, nbody.build_nbody(p, verbose=False)
+
+
+def test_beta_one_half_is_accepted_for_a_cusp():
+    """beta = 1/2 is the radial limit of an r^-1 cusp; it builds, samples and has the right anisotropy."""
+    p, nb = _nfw(300_000, beta_comp=[0.5, 0, 0, 0, 0])
+    c = nbody.sample_nbody(p, nb, np.random.default_rng(3), verbose=False)[0]
+    rs, edges = bins(nb, p)
+    _, beta, cnt = nbody.measure_beta(c["pos"].astype(float), c["vel"].astype(float), edges)
+    good = cnt > 5000
+    assert good.sum() >= 4 and np.all(np.abs(beta[good] - 0.5) < 0.04)
+
+
+def test_outermost_table_bin_cannot_crash_the_sampler():
+    """About 2e-5 of the radii fall in the last table bin, where Psi is below the first energy-grid point
+    (f = 0); they are drawn again, so nothing is sampled beyond the grid and the sampler does not raise."""
+    for kw in ({}, dict(beta_comp=[0.5, 0, 0, 0, 0]), dict(raniso_comp=[2.0, 0, 0, 0, 0])):
+        p, nb = _nfw(400_000, istaper=False, rtrunc_comp=[0.0, 0, 0, 0, 0], **kw)
+        c = nbody.sample_nbody(p, nb, np.random.default_rng(5), verbose=False)[0]
+        assert c["radius"].max() <= nb.rtab[-2] * (1 + 1e-9)
+
+
+def test_isotropic_sampler_fills_the_cusp():
+    """The Fortran velocity-box rejection restarted particles at a new radius after 1000 failures, which in a
+    cusp (f spans ~12 decades) moved them out of the centre: 29 % of the mass inside 0.5 kpc at 1e6 particles."""
+    p, nb = _nfw(300_000)
+    c = nbody.sample_nbody(p, nb, np.random.default_rng(7), verbose=False)[0]
+    r = np.linalg.norm(c["pos"].astype(float), axis=1)
+    expected = np.interp(0.5, nb.rtab, nb.menc_tab[0]) / c["mpart"]
+    assert 0.75 < (r < 0.5).sum() / expected < 1.3
+
+
+def test_cusp_energy_grid_recovers_the_jeans_dispersion():
+    """On the default energy grid the DF is too coarsely tabulated near the centre (sigma ~0.45 of Jeans at
+    r = 0.08 kpc here); egrid='cusp' refines it there and leaves the default untouched."""
+    p = make(n=1000)
+    default = nbody.build_nbody(p, verbose=False)
+    nb = nbody.build_nbody(p, verbose=False, egrid="cusp")
+    assert default.etab.size == nbody.NTAB and nb.etab.size > nbody.NTAB and nb.ftab.shape[1] == nb.etab.size
+    r, mh = nb.rtab, nb.menc_tab[0]
+    rho = np.gradient(mh, r) / (4 * PI * r ** 2)
+    integrand = rho * GGDT * mh / r ** 2
+    cum = np.concatenate(([0.0], np.cumsum(0.5 * (integrand[1:] + integrand[:-1]) * np.diff(r))))
+    sigr2 = (cum[-1] - cum) / rho                                   # isotropic Jeans: rho sigma_r^2 = int_r^inf rho G M / r'^2
+    rng = np.random.default_rng(2)
+    for rr in (0.03, 0.08, 0.3):
+        phi = np.full(100_000, np.interp(rr, r, nb.ptab))
+        vr, vt = nbody._velocities_beta(nb, 0, phi, 0.0, rng)
+        ratio = np.sqrt(np.mean(vr ** 2 + vt ** 2) / 3 * nb.vscale ** 2 / np.interp(rr, r, sigr2))
+        assert ratio == pytest.approx(1.0, abs=0.04)
+
+
+def test_energy_grid_argument_is_validated():
+    p = make(n=1000)
+    with pytest.raises(ValueError, match="egrid"):
+        nbody.build_nbody(p, verbose=False, egrid=np.linspace(1.0, 2.0, 50)[::-1])          # not increasing
+    with pytest.raises(ValueError, match="egrid"):
+        nbody.build_nbody(p, verbose=False, egrid=np.linspace(1e9, 2e9, 50))                # outside the potential

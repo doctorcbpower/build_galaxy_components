@@ -19,7 +19,7 @@ Velocity anisotropy (per component, in the parameter file):
   * ``raniso_comp = r_a / rs`` -- Osipkov-Merritt, beta(r) = r^2/(r^2 + r_a^2): isotropic in
     the centre, radially biased outside.  f depends on Q = E - L^2/(2 r_a^2) and is found by
     the same Eddington inversion applied to rho_Q = (1 + r^2/r_a^2) rho.
-  * ``beta_comp = beta`` -- constant beta in (-1/2, 1/2), radial or tangential:
+  * ``beta_comp = beta`` -- constant beta in (-1/2, 1/2], radial or tangential:
     f(E, L) = L^(-2 beta) g(E), with g from a generalised Abel inversion of r^(2 beta) rho,
 
         g(E) = [K Gamma(a) Gamma(g)]^-1 int_0^E (d^2 R/dPsi^2) (E-Psi)^(g-1) dPsi,
@@ -186,7 +186,7 @@ def _fabel_integral(etab, ptab_asc, g_asc):
 
 
 def _abel_integral(etab, ptab_asc, g_asc, gam):
-    """For each E: int_0^E g(Psi) (E-Psi)^(gam-1) dPsi with g piecewise linear (exact), 0 < gam < 1."""
+    """For each E: int_0^E g(Psi) (E-Psi)^(gam-1) dPsi with g piecewise linear (exact), 0 < gam <= 1."""
     p0, p1 = ptab_asc[:-1], ptab_asc[1:]
     g0, g1 = g_asc[:-1], g_asc[1:]
     b = (g1 - g0) / (p1 - p0)
@@ -242,7 +242,16 @@ class NBodyModel:
     aniso: tuple = ()       # per component: r_a [kpc] (om), beta (beta), 0 (iso)
 
 
-def build_nbody(p: Params, verbose=True, legacy=True) -> NBodyModel:
+def cusp_egrid(ptab, n=4 * NTAB):
+    """Energy grid refined towards the centre: the default grid plus ``n`` points log-spaced in
+    Psi(r_min) - E, so a cusp (where Psi varies by a fraction of a percent over the inner decades) is resolved."""
+    lo, hi = ptab[-2], ptab[0]
+    dx = np.logspace(np.log10((hi - ptab[3]) / 10.0), np.log10(hi - lo), n)
+    grid = np.concatenate((10 ** np.linspace(np.log10(lo), np.log10(hi), NTAB), hi - dx))
+    return np.unique(grid[(grid >= lo) & (grid <= hi)])
+
+
+def build_nbody(p: Params, verbose=True, legacy=True, egrid=None) -> NBodyModel:
     log = print if verbose else (lambda *a, **k: None)
     ncomp = p.ncomp
     if p.istaper and any(p.rtrunc_comp[i] <= 0 for i in range(ncomp)):
@@ -337,9 +346,9 @@ def build_nbody(p: Params, verbose=True, legacy=True) -> NBodyModel:
             aniso.append(ra * rs)
             rho_eff[i] = rhotab[i] * (1.0 + (rtab / (ra * rs)) ** 2)
         elif beta != 0:
-            if not -0.5 < beta < 0.5:
+            if not -0.5 < beta <= 0.5:
                 raise ValueError(f"beta_comp[{i}] = {beta}: the constant-beta inversion is implemented for "
-                                 "-1/2 < beta < 1/2 (a cusp rho ~ r^-1 cannot be more radial than beta = 1/2)")
+                                 "-1/2 < beta <= 1/2 (a cusp rho ~ r^-1 cannot be more radial than beta = 1/2)")
             kinds.append("beta")
             aniso.append(float(beta))
             rho_eff[i] = rhotab[i] * rtab ** (2 * beta)
@@ -363,10 +372,16 @@ def build_nbody(p: Params, verbose=True, legacy=True) -> NBodyModel:
 
     # distribution function on a log grid in E
     lemin, lemax = np.log10(ptab[-2]), np.log10(ptab[0])
-    etab = 10 ** np.linspace(lemin, lemax, NTAB)
+    if egrid is None:
+        etab = 10 ** np.linspace(lemin, lemax, NTAB)
+    else:                       # "cusp" or an explicit increasing array inside [Psi(r_max), Psi(r_min)]
+        etab = cusp_egrid(ptab) if isinstance(egrid, str) and egrid == "cusp" else np.asarray(egrid, dtype=float)
+        if etab.ndim != 1 or etab.size < 10 or np.any(np.diff(etab) <= 0) or etab[0] < ptab[-2] * (1 - 1e-12) \
+                or etab[-1] > ptab[0] * (1 + 1e-12):
+            raise ValueError("egrid must be 'cusp' or a 1-D increasing array within [Psi(r_max), Psi(r_min)]")
     # Psi decreases with r: reverse so it increases
     pasc = ptab[::-1]
-    ftab = np.empty((ncomp, NTAB))
+    ftab = np.empty((ncomp, etab.size))
     for i in range(ncomp):
         if kinds[i] == "iso":
             raw_iso = _fabel_integral(etab, pasc, drhopsi[i][::-1]) / np.sqrt(8.0) / PI ** 2
@@ -489,48 +504,30 @@ def sample_nbody(p: Params, nb: NBodyModel, rng, verbose=True):
         phi = np.interp(radius, nb.rtab, nb.ptab)
         kind = nb.kinds[i] if nb.kinds else "iso"
         vel = np.zeros((n, 3))
-        if kind == "iso":
-            fmax = np.interp(phi, nb.etab, nb.ftab[i])  # f at E=Psi (v=0)
-            todo = np.arange(n)
-            attempts = np.zeros(n, dtype=int)
-            while todo.size:
-                vesc = np.sqrt(2.0 * phi[todo])
-                v = (2.0 * rng.random((todo.size, 3)) - 1.0) * vesc[:, None]
-                e = phi[todo] - 0.5 * np.sum(v * v, axis=1)
-                ok = (e > 0) & (e >= nb.etab[0]) & (e <= nb.etab[-1])
-                fs = np.interp(e, nb.etab, nb.ftab[i])
-                ok &= fs > fmax[todo] * rng.random(todo.size)
-                vel[todo[ok]] = v[ok]
-                attempts[todo] += 1
-                todo = todo[~ok]
-                # Fortran restarts with a new radius after 1000 failed attempts
-                redo = todo[attempts[todo] > 1000]
-                if redo.size:
-                    radius[redo] = np.interp(rng.random(redo.size) * mtot_c, nb.menc_tab[i], nb.rtab)
-                    phi[redo] = np.interp(radius[redo], nb.rtab, nb.ptab)
-                    fmax[redo] = np.interp(phi[redo], nb.etab, nb.ftab[i])
-                    attempts[redo] = 0
-        if kind != "iso":
-            for _ in range(50):
-                bad = np.interp(phi, nb.etab, nb.ftab[i]) <= 0
-                if not bad.any():
-                    break
-                radius[bad] = np.interp(rng.random(bad.sum()) * mtot_c, nb.menc_tab[i], nb.rtab)
-                phi[bad] = np.interp(radius[bad], nb.rtab, nb.ptab)
+        for _ in range(50):     # radii where f(Psi) vanishes cannot be sampled: draw them again.  That includes
+            # the outermost table bin, where Psi lies below the first energy-grid point (f = 0 there; np.interp
+            # would clamp to the first value instead).  About 2e-5 of the particles.
+            bad = (phi < nb.etab[0]) | (np.interp(phi, nb.etab, nb.ftab[i]) <= 0)
+            if not bad.any():
+                break
+            radius[bad] = np.interp(rng.random(bad.sum()) * mtot_c, nb.menc_tab[i], nb.rtab)
+            phi[bad] = np.interp(radius[bad], nb.rtab, nb.ptab)
         # isotropic directions
         x1 = 2.0 * rng.random(n) - 1.0
         az = 2 * PI * rng.random(n)
         rc = np.sqrt(1.0 - x1 * x1)
         pos = radius[:, None] * np.column_stack((x1, rc * np.cos(az), rc * np.sin(az)))
-        if kind != "iso":      # velocities in the local frame (e_r, e_1, e_2) at each position
-            er, e1, e2 = _local_frame(pos)
-            if kind == "om":
-                vr, v1, v2 = _velocities_om(nb, i, radius, phi, nb.aniso[i], rng)
-            else:
-                vr, vt = _velocities_beta(nb, i, phi, nb.aniso[i], rng)
-                psi = 2 * PI * rng.random(n)
-                v1, v2 = vt * np.cos(psi), vt * np.sin(psi)
-            vel = vr[:, None] * er + v1[:, None] * e1 + v2[:, None] * e2
+        # velocities in the local frame (e_r, e_1, e_2) at each position
+        er, e1, e2 = _local_frame(pos)
+        if kind == "om":
+            vr, v1, v2 = _velocities_om(nb, i, radius, phi, nb.aniso[i], rng)
+        else:
+            # isotropic is beta = 0; unlike a velocity-box rejection this stays exact in a cusp, where
+            # f spans ~12 decades and the Fortran's restart-after-1000-tries would deplete the centre
+            vr, vt = _velocities_beta(nb, i, phi, nb.aniso[i] if kind == "beta" else 0.0, rng)
+            psi = 2 * PI * rng.random(n)
+            v1, v2 = vt * np.cos(psi), vt * np.sin(psi)
+        vel = vr[:, None] * er + v1[:, None] * e1 + v2[:, None] * e2
         out.append({"pos": pos.astype(np.float32),
                     "vel": (vel * nb.vscale).astype(np.float32),
                     "mpart": mpart, "radius": radius})

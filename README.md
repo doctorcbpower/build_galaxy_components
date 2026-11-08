@@ -38,7 +38,7 @@ Python ≥ 3.11. From a clone of this repository:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[test]"        # numpy>=2, scipy>=1.12, h5py (+ pytest, f90nml); editable, so edits take effect
-pytest -q                       # 146 tests (one needs jupyter), ~2 min
+pytest -q                       # 152 tests (one needs jupyter), ~2 min
 galaxy-components --help        # console script (also: python -m galaxy_components ...)
 ```
 The only required dependencies are `numpy`, `scipy` and `h5py`; `f90nml` is optional and only needed to read legacy Fortran
@@ -185,7 +185,7 @@ in `[nbody]` (at most one of the two for a component):
 | setting | model | β(r) | valid range |
 |---|---|---|---|
 | `raniso_comp = [r_a/r_s, …]` | Osipkov–Merritt, f = f(Q), Q = E − L²/2r_a² | r²/(r² + r_a²): isotropic centre, radial outskirts | β ≥ 0; for an NFW cusp r_a ≳ 0.5 r_s |
-| `beta_comp = [β, …]` | constant anisotropy, f = L^(−2β) g(E) | β at all radii, **radial or tangential** | −½ < β < ½; a cored profile cannot be radially biased |
+| `beta_comp = [β, …]` | constant anisotropy, f = L^(−2β) g(E) | β at all radii, **radial or tangential** | −½ < β ≤ ½ (β = ½ is the radial limit of an r⁻¹ cusp); a cored profile cannot be radially biased |
 
 Both reuse the existing inversion on an effective density (ρ(1 + r²/r_a²) or r^(2β)ρ; for constant β the Abel kernel exponent
 becomes ½ + β) and are sampled exactly, in a local frame along r̂ (the isotropic path is unchanged bit for bit). A distribution function
@@ -194,6 +194,13 @@ more than 0.1 %). Measured from samples, β(r) follows the target to ≈ 0.01 wh
 equation holds to ≈ 1 %, i.e. these are real equilibria, not just correct second moments.
 The isotropic path now also *warns* if its distribution function is negative where it matters (it used to clip it silently).
 `raniso_comp` is in units of r_s = r200/c200; `beta_comp` is a Python-only field (the Fortran namelist reader would reject it).
+
+**Cusps.** The distribution function is tabulated on an energy grid that is logarithmic in E, which is too coarse near the centre of
+a cusp, where Ψ varies by a fraction of a percent over the inner decades: with the default grid the velocity dispersion of an NFW halo
+is 0.45 of the Jeans value at r = 0.004 r_s and 0.73 at 0.0015 r_s. `nbody.build_nbody(p, egrid="cusp")` adds points log-spaced
+in Ψ(r_min) − E (σ/Jeans = 1.00 to 1 %); `egrid` also takes an explicit increasing array. The default is unchanged. Isotropic components
+are sampled with the same exact sampler as the anisotropic ones (β = 0); the Fortran's uniform velocity box with a restart at a new radius
+after 1000 failed tries moved particles out of a cusp (29 % of the mass inside 0.5 kpc at 10⁶ particles, in the test halo).
 
 **Gas halo** (`halo`). Komatsu & Seljak (2001) polytropic gas, hydrostatic in the dark halo, with Γ matched at r200. With the
 default `consistent` mode the gas halo sits in the **same dark halo the disc and N-body parts use**; `--legacy` reproduces the
@@ -373,6 +380,7 @@ out-of-bounds read in `fintrp` (`legacy/mk_gas_disc.f90`, `xp(0)`).
 | N-body potential interpolation | extrapolates from the wrong table segment | interpolates correctly |
 | N-body taper, several components | taper computed with the global NFW scale, so a component with another scale gets a discontinuous density and a negative f | each component's own scale (identical for one component with `rscale_comp = 1`) |
 | negative isotropic f | clipped silently | warning when it changes the density by > 1 % |
+| isotropic velocity sampling | uniform velocity box, restart at a new radius after 1000 failures (depletes a cusp) | the exact sampler of the anisotropic path at β = 0 |
 | N-body velocity scale | `√(G·mass_comp(1)/r_scale)` | `√(G·mtot/r_scale)` (identical for NFW/Burkert) |
 | N-body `drptab` edge fill | mixes in `dptab` differences | same by default; `--fix-legacy` corrects |
 | disc vertical positions | snapped to the 500-point z table | interpolated (`snap_z` restores) |
