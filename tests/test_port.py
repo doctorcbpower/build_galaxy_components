@@ -40,7 +40,7 @@ def test_isolated_isothermal_sheet_is_sech2():
 
 def test_nbody_distribution_function_matches_fortran():
     p = read_params(DATA / "nbody_ref_params.txt")
-    nb = nbody.build_nbody(p, verbose=False)
+    nb = nbody.build_nbody(p, verbose=False, egrid="log")      # the Fortran oracle uses its own energy grid
     ref = np.loadtxt(DATA / "nbody_ref_distribution_function.txt")
     n = len(ref)
     assert np.allclose(nb.etab[:n], ref[:, 0], rtol=1e-4)

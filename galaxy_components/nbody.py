@@ -242,16 +242,14 @@ class NBodyModel:
     aniso: tuple = ()       # per component: r_a [kpc] (om), beta (beta), 0 (iso)
 
 
-def cusp_egrid(ptab, n=4 * NTAB):
-    """Energy grid refined towards the centre: the default grid plus ``n`` points log-spaced in
-    Psi(r_min) - E, so a cusp (where Psi varies by a fraction of a percent over the inner decades) is resolved."""
-    lo, hi = ptab[-2], ptab[0]
-    dx = np.logspace(np.log10((hi - ptab[3]) / 10.0), np.log10(hi - lo), n)
-    grid = np.concatenate((10 ** np.linspace(np.log10(lo), np.log10(hi), NTAB), hi - dx))
-    return np.unique(grid[(grid >= lo) & (grid <= hi)])
-
-
 def build_nbody(p: Params, verbose=True, legacy=True, egrid=None) -> NBodyModel:
+    """Potential, enclosed masses and distribution functions of the spherical components.
+
+    ``egrid`` is the energy grid f(E) is tabulated on.  ``None`` (default) puts a node at Psi(r_i) for every radial
+    table node, so it follows the potential: logarithmic in Psi(r_min) - E in a cusp, in E in the outer halo.
+    ``"log"`` is the Fortran grid, logarithmic in E, which under-resolves a cusp (sigma 0.45 of Jeans at 0.08 kpc
+    in an NFW halo); or pass an increasing array within [Psi(r_max), Psi(r_min)].
+    """
     log = print if verbose else (lambda *a, **k: None)
     ncomp = p.ncomp
     if p.istaper and any(p.rtrunc_comp[i] <= 0 for i in range(ncomp)):
@@ -372,13 +370,17 @@ def build_nbody(p: Params, verbose=True, legacy=True, egrid=None) -> NBodyModel:
 
     # distribution function on a log grid in E
     lemin, lemax = np.log10(ptab[-2]), np.log10(ptab[0])
-    if egrid is None:
+    if egrid is None:           # one energy node per radial table node, E_i = Psi(r_i)
+        etab = ptab[::-1][1:].copy()
+    elif isinstance(egrid, str) and egrid == "log":   # the Fortran grid: logarithmic in E
         etab = 10 ** np.linspace(lemin, lemax, NTAB)
-    else:                       # "cusp" or an explicit increasing array inside [Psi(r_max), Psi(r_min)]
-        etab = cusp_egrid(ptab) if isinstance(egrid, str) and egrid == "cusp" else np.asarray(egrid, dtype=float)
-        if etab.ndim != 1 or etab.size < 10 or np.any(np.diff(etab) <= 0) or etab[0] < ptab[-2] * (1 - 1e-12) \
-                or etab[-1] > ptab[0] * (1 + 1e-12):
-            raise ValueError("egrid must be 'cusp' or a 1-D increasing array within [Psi(r_max), Psi(r_min)]")
+    elif isinstance(egrid, str):
+        raise ValueError(f"egrid = {egrid!r}: use None, 'log' or an increasing array of energies")
+    else:                       # an explicit increasing array inside [Psi(r_max), Psi(r_min)]
+        etab = np.asarray(egrid, dtype=float)
+    if etab.ndim != 1 or etab.size < 10 or np.any(np.diff(etab) <= 0) or etab[0] < ptab[-2] * (1 - 1e-12) \
+            or etab[-1] > ptab[0] * (1 + 1e-12):
+        raise ValueError("egrid must be None, 'log' or a 1-D increasing array within [Psi(r_max), Psi(r_min)]")
     # Psi decreases with r: reverse so it increases
     pasc = ptab[::-1]
     ftab = np.empty((ncomp, etab.size))

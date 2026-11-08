@@ -83,17 +83,19 @@ def test_sampled_halo_obeys_the_jeans_equation(models, name):
     lhs = np.gradient(np.log(nu * s2), np.log(mid)) + 2 * beta
     rhs = -GGDT * np.interp(mid, nb.rtab, nb.menc_tab[0]) / (mid * s2)
     inner = slice(2, -1)                              # skip the noisy innermost / edge bins
-    assert np.max(np.abs(lhs[inner] / rhs[inner] - 1)) < 0.08     # shot noise ~6 % in the innermost bin at this N
+    assert np.max(np.abs(lhs[inner] / rhs[inner] - 1)) < 0.10     # shot noise ~4-6 % (1 sigma) in the innermost bin at this N
 
 
 def test_isotropic_output_is_unchanged():
-    """Regression guard for the isotropic sampler (pinned after it switched from the Fortran velocity-box
-    rejection to the exact sampler: 193.857 -> 193.802, i.e. 0.03 %, statistically the same halo)."""
+    """Regression guard for the isotropic sampler on both energy grids.  Pinned after the sampler switched from the
+    Fortran velocity-box rejection to the exact one (193.857 -> 193.802 km/s, 0.03 %) and the default grid from
+    logarithmic in E to one node per radial node (193.802 -> 193.381, 0.2 %: the inner cusp is no longer too hot)."""
     p = read_params(DATA / "nbody_ref_params.txt")
-    nb = nbody.build_nbody(p, verbose=False)
-    c = nbody.sample_nbody(p, nb, np.random.default_rng(19721), verbose=False)
-    assert nb.kinds == ("iso",)
-    assert nbody.summarise(nb, c)["sigma_tot"] == pytest.approx(193.80221386399668, rel=1e-12)
+    for egrid, expected in ((None, 193.3808277849816), ("log", 193.80221386399668)):
+        nb = nbody.build_nbody(p, verbose=False, egrid=egrid)
+        c = nbody.sample_nbody(p, nb, np.random.default_rng(19721), verbose=False)
+        assert nb.kinds == ("iso",)
+        assert nbody.summarise(nb, c)["sigma_tot"] == pytest.approx(expected, rel=1e-12)
 
 
 def test_limits_reduce_to_the_isotropic_distribution_function():
@@ -154,7 +156,7 @@ def test_mixed_components_each_get_their_own_anisotropy():
     assert len(comps) == 2 and all(np.all(np.isfinite(c["vel"])) for c in comps)
     rs = nb.r200 / p.c200
     _, beta, cnt = nbody.measure_beta(comps[1]["pos"], comps[1]["vel"], rs * np.array([0.5, 1, 2, 4]))
-    assert np.all(np.abs(beta[cnt > 8000] - 0.2) < 0.04)
+    assert np.all(np.abs(beta[cnt > 8000] - 0.2) < 0.06)      # sample scatter is 0.01-0.02 per bin (3 sigma)
 
 
 def test_clipping_effect_measures_the_density_change():
@@ -221,29 +223,46 @@ def test_isotropic_sampler_fills_the_cusp():
     assert 0.75 < (r < 0.5).sum() / expected < 1.3
 
 
-def test_cusp_energy_grid_recovers_the_jeans_dispersion():
-    """On the default energy grid the DF is too coarsely tabulated near the centre (sigma ~0.45 of Jeans at
-    r = 0.08 kpc here); egrid='cusp' refines it there and leaves the default untouched."""
-    p = make(n=1000)
-    default = nbody.build_nbody(p, verbose=False)
-    nb = nbody.build_nbody(p, verbose=False, egrid="cusp")
-    assert default.etab.size == nbody.NTAB and nb.etab.size > nbody.NTAB and nb.ftab.shape[1] == nb.etab.size
+def _jeans_ratio(nb, rr, rng, n=100_000):
     r, mh = nb.rtab, nb.menc_tab[0]
     rho = np.gradient(mh, r) / (4 * PI * r ** 2)
     integrand = rho * GGDT * mh / r ** 2
     cum = np.concatenate(([0.0], np.cumsum(0.5 * (integrand[1:] + integrand[:-1]) * np.diff(r))))
-    sigr2 = (cum[-1] - cum) / rho                                   # isotropic Jeans: rho sigma_r^2 = int_r^inf rho G M / r'^2
+    with np.errstate(invalid="ignore", divide="ignore"):
+        sigr2 = (cum[-1] - cum) / rho                                   # isotropic Jeans: rho sigma_r^2 = int_r^inf rho G M / r'^2
+    phi = np.full(n, np.interp(rr, r, nb.ptab))
+    vr, vt = nbody._velocities_beta(nb, 0, phi, 0.0, rng)
+    return np.sqrt(np.mean(vr ** 2 + vt ** 2) / 3 * nb.vscale ** 2 / np.interp(rr, r, sigr2))
+
+
+def test_default_energy_grid_resolves_the_cusp():
+    """One energy node per radial node follows the potential, so the dispersion of an NFW cusp matches Jeans
+    down to 0.003 kpc; the Fortran grid (logarithmic in E) is 2x too hot there and 0.45x too cold at 0.08 kpc."""
+    p = make(n=1000)
+    nb = nbody.build_nbody(p, verbose=False)
     rng = np.random.default_rng(2)
-    for rr in (0.03, 0.08, 0.3):
-        phi = np.full(100_000, np.interp(rr, r, nb.ptab))
-        vr, vt = nbody._velocities_beta(nb, 0, phi, 0.0, rng)
-        ratio = np.sqrt(np.mean(vr ** 2 + vt ** 2) / 3 * nb.vscale ** 2 / np.interp(rr, r, sigr2))
-        assert ratio == pytest.approx(1.0, abs=0.04)
+    assert nb.etab.size == nbody.NTAB - 1 and nb.ftab.shape[1] == nb.etab.size
+    for rr in (0.003, 0.01, 0.03, 0.08, 0.3, 2.0):
+        assert _jeans_ratio(nb, rr, rng) == pytest.approx(1.0, abs=0.04)
+    log = nbody.build_nbody(p, verbose=False, egrid="log")
+    assert log.etab.size == nbody.NTAB and _jeans_ratio(log, 0.08, rng) < 0.6      # the known Fortran-grid deficit
+
+
+def test_default_energy_grid_resolves_anisotropic_cusps():
+    rng = np.random.default_rng(4)
+    for kw, beta in ((dict(beta_comp=[0.3, 0, 0, 0, 0]), 0.3), (dict(beta_comp=[-0.3, 0, 0, 0, 0]), -0.3)):
+        p = make(n=1000, **kw)
+        nb = nbody.build_nbody(p, verbose=False)
+        phi = np.full(100_000, np.interp(0.03, nb.rtab, nb.ptab))
+        vr, vt = nbody._velocities_beta(nb, 0, phi, beta, rng)
+        assert 1.0 - 0.5 * np.mean(vt ** 2) / np.mean(vr ** 2) == pytest.approx(beta, abs=0.02)   # beta at 0.03 kpc
 
 
 def test_energy_grid_argument_is_validated():
     p = make(n=1000)
     with pytest.raises(ValueError, match="egrid"):
         nbody.build_nbody(p, verbose=False, egrid=np.linspace(1.0, 2.0, 50)[::-1])          # not increasing
+    with pytest.raises(ValueError, match="egrid"):
+        nbody.build_nbody(p, verbose=False, egrid="cusp")
     with pytest.raises(ValueError, match="egrid"):
         nbody.build_nbody(p, verbose=False, egrid=np.linspace(1e9, 2e9, 50))                # outside the potential

@@ -46,7 +46,7 @@ def _write_disc_tables(out, p, model, disc):
 
 def run_nbody(args):
     p = read_params(args.params)
-    nb = nbody.build_nbody(p, legacy=not args.fix_legacy)
+    nb = nbody.build_nbody(p, legacy=not args.fix_legacy, egrid="log" if args.log_egrid else None)
     out = Path(args.outdir)
     out.mkdir(parents=True, exist_ok=True)
     rscale0 = nb.rscale_comp[0]
@@ -188,6 +188,8 @@ def main(argv=None):
         if name in ("halo", "galaxy", "system"):
             sp.add_argument("--halo-core", type=float, default=None,
                             help="gas entropy floor / K&S entropy at r200 (overrides &MODEL halo_core)")
+            sp.add_argument("--log-egrid", action="store_true",
+                            help="Fortran energy grid (logarithmic in E) instead of one node per radial node")
             sp.add_argument("--zero-edge", action="store_true",
                             help="hydrostatic halo to rtrunc*r200 with zero pressure at the edge (Donnert 2013)")
         if name == "halo":

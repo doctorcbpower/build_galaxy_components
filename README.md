@@ -195,12 +195,14 @@ equation holds to ≈ 1 %, i.e. these are real equilibria, not just correct seco
 The isotropic path now also *warns* if its distribution function is negative where it matters (it used to clip it silently).
 `raniso_comp` is in units of r_s = r200/c200; `beta_comp` is a Python-only field (the Fortran namelist reader would reject it).
 
-**Cusps.** The distribution function is tabulated on an energy grid that is logarithmic in E, which is too coarse near the centre of
-a cusp, where Ψ varies by a fraction of a percent over the inner decades: with the default grid the velocity dispersion of an NFW halo
-is 0.45 of the Jeans value at r = 0.004 r_s and 0.73 at 0.0015 r_s. `nbody.build_nbody(p, egrid="cusp")` adds points log-spaced
-in Ψ(r_min) − E (σ/Jeans = 1.00 to 1 %); `egrid` also takes an explicit increasing array. The default is unchanged. Isotropic components
-are sampled with the same exact sampler as the anisotropic ones (β = 0); the Fortran's uniform velocity box with a restart at a new radius
-after 1000 failed tries moved particles out of a cusp (29 % of the mass inside 0.5 kpc at 10⁶ particles, in the test halo).
+**Cusps.** The distribution function is tabulated on an energy grid. The Fortran's grid is logarithmic in E, which is too coarse
+near the centre of a cusp, where Ψ varies by a fraction of a percent over the inner decades: in an NFW halo it gives a velocity
+dispersion of 2.0× the Jeans value at r = 0.00015 r_s, 0.73× at 0.0015 r_s and 0.45× at 0.004 r_s. The default grid here has one energy node at
+Ψ(r_i) for every radial table node, so it follows the potential (logarithmic in Ψ(r_min) − E in a cusp, in E in the outer halo) and
+gives σ/Jeans = 1.00 ± 0.01 from 0.003 kpc outwards at the same number of points; `egrid="log"` (CLI `nbody --log-egrid`)
+restores the Fortran grid, and `egrid` also takes an explicit increasing array. Isotropic components are sampled with the same exact
+sampler as the anisotropic ones (β = 0); the Fortran's uniform velocity box with a restart at a new radius after 1000 failed tries
+moved particles out of a cusp (29 % of the mass inside 0.5 kpc at 10⁶ particles, in the test halo).
 
 **Gas halo** (`halo`). Komatsu & Seljak (2001) polytropic gas, hydrostatic in the dark halo, with Γ matched at r200. With the
 default `consistent` mode the gas halo sits in the **same dark halo the disc and N-body parts use**; `--legacy` reproduces the
@@ -395,6 +397,7 @@ out-of-bounds read in `fintrp` (`legacy/mk_gas_disc.f90`, `xp(0)`).
   monopole (enclosed mass), which under-represents its in-plane pull and does not flatten the halo, so it is a first approximation
   for light discs. A proper disc response is deliberately left to dedicated codes (see Scope). The anisotropy is Osipkov–Merritt or constant β in (−½, ½) only. The isotropic sampler
   measures β ≈ −0.14 in the innermost ~0.05 r_s (about 0.1 % of the particles; probably its radius-redraw rule, not investigated); the anisotropic samplers recover
+| N-body energy grid | logarithmic in E: σ is 0.45× Jeans at r = 0.004 r_s in a cusp | one node per radial node (`egrid="log"` restores) |
   their target there to ≈ 0.05.
 * Systems are superposed, not re-equilibrated, apart from the gas pressure-balance rules.
 * Glass-file sampling and Gadget binary output are not ported; `form_comp='general'` is not supported.
